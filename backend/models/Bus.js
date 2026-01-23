@@ -15,6 +15,12 @@ const Bus = sequelize.define(
       allowNull: false,
     },
 
+    driver_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: "Foreign key to Driver - each bus is assigned to a single driver"
+    },
+
     plate_number: {
       type: DataTypes.STRING,
       allowNull: false,

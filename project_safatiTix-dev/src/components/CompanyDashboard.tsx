@@ -211,11 +211,11 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
         setScheduleDriver('');
         await fetchData();
       } else {
-        // Backend endpoint may not be fully implemented - handle gracefully
-        alert('Unable to add schedule. Please ensure the backend is properly configured.');
+        const errorData = await res.json().catch(() => ({}));
+        const errorMessage = errorData.error || 'Unable to add schedule. Please ensure the backend is properly configured.';
+        alert(errorMessage);
       }
     } catch (error) {
-      // Network errors are expected if backend endpoint doesn't exist yet - handle gracefully
       alert('Unable to connect to server. Please check your connection or try again later.');
     }
   }
@@ -265,7 +265,9 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
         setDriverPhone('');
         await fetchData();
       } else {
-        alert('Unable to add driver. Please ensure the backend is properly configured.');
+        const errorData = await res.json().catch(() => ({}));
+        const errorMessage = errorData.error || 'Unable to add driver. Please ensure the backend is properly configured.';
+        alert(errorMessage);
       }
     } catch (error) {
       alert('Unable to connect to server. Please check your connection or try again later.');
@@ -423,9 +425,11 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
 
   // Calculate revenue by schedule
   const scheduleRevenue = schedules.map(schedule => {
+    // Use bookedSeats from backend or fall back to counting paid tickets
+    const bookedSeatsFromBackend = schedule.bookedSeats || 0;
     const scheduleTickets = tickets.filter(t => t.scheduleId === schedule.id && t.paymentStatus === 'paid');
     const revenue = scheduleTickets.reduce((sum, t) => sum + (t.price || 0), 0);
-    const soldSeats = scheduleTickets.length;
+    const soldSeats = bookedSeatsFromBackend > 0 ? bookedSeatsFromBackend : scheduleTickets.length;
     return { ...schedule, revenue, soldSeats };
   });
 
@@ -823,7 +827,9 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
                   </TableHeader>
                   <TableBody>
                     {drivers.map((driver) => {
-                      const assignedBus = buses.find(b => b.driverId === driver.id);
+                      const assignedBuses = driver.buses && driver.buses.length > 0 
+                        ? driver.buses.map(b => `${b.plate_number} (${b.model})`).join(', ')
+                        : 'Unassigned';
                       return (
                         <TableRow key={driver.id}>
                           <TableCell>{driver.name}</TableCell>
@@ -835,7 +841,7 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            {assignedBus ? assignedBus.plateNumber : 'Unassigned'}
+                            <span className="text-sm font-medium">{assignedBuses}</span>
                           </TableCell>
                         </TableRow>
                       );
@@ -985,9 +991,9 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
                     <TableRow>
                       <TableHead>Route</TableHead>
                       <TableHead>Date</TableHead>
-                      <TableHead>Time</TableHead>
-                      <TableHead>Price</TableHead>
-                      <TableHead>Seats</TableHead>
+                      <TableHead>Departure</TableHead>
+                      <TableHead>Price/Seat</TableHead>
+                      <TableHead>Available</TableHead>
                       <TableHead>Sold</TableHead>
                       <TableHead>Revenue</TableHead>
                     </TableRow>
@@ -995,16 +1001,16 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
                   <TableBody>
                     {scheduleRevenue.map((schedule) => (
                       <TableRow key={schedule.id}>
-                        <TableCell>{schedule.routeFrom} → {schedule.routeTo}</TableCell>
-                        <TableCell>{schedule.date}</TableCell>
-                        <TableCell>{schedule.departureTime}</TableCell>
-                        <TableCell>RWF {schedule.price}</TableCell>
-                        <TableCell>{schedule.seatsAvailable}/{schedule.totalSeats}</TableCell>
+                        <TableCell className="font-medium">{schedule.routeFrom} → {schedule.routeTo}</TableCell>
+                        <TableCell>{new Date(schedule.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</TableCell>
+                        <TableCell>{new Date(schedule.departureTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</TableCell>
+                        <TableCell>RWF {schedule.price.toLocaleString()}</TableCell>
+                        <TableCell>{schedule.seatsAvailable} seats</TableCell>
                         <TableCell>
                           <Badge className="bg-[#0077B6]">{schedule.soldSeats}</Badge>
                         </TableCell>
                         <TableCell className="text-[#27AE60] font-bold">
-                          RWF {schedule.revenue.toLocaleString()}
+                          RWF {(schedule.revenue || (schedule.soldSeats * schedule.price)).toLocaleString()}
                         </TableCell>
                       </TableRow>
                     ))}

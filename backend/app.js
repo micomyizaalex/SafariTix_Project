@@ -52,9 +52,9 @@ const connectDatabase = async () => {
   try {
     await sequelize.authenticate();
     console.log(' Database connected successfully');
-    // Skip sync for now to avoid hanging
+    // Skip sync to avoid hanging - run sync-schema.js separately
     // if (process.env.NODE_ENV === 'development') {
-    //   await sequelize.sync({alter:false});
+    //   await sequelize.sync({alter: true});
     //   console.log(' Database models synchronized');
     // }
     

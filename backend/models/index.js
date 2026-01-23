@@ -41,6 +41,7 @@ Company.hasMany(User, { foreignKey: "company_id", as: "employees" });
 
 // Bus relationships
 Bus.belongsTo(Company, { foreignKey: "company_id" });
+Bus.belongsTo(Driver, { foreignKey: "driver_id", as: "driver" });
 Bus.hasMany(DriverAssignment, { foreignKey: "bus_id" });
 Bus.hasMany(Journal, { foreignKey: "bus_id" });
 Bus.hasMany(Schedule, { foreignKey: "bus_id" });
@@ -49,6 +50,7 @@ Bus.hasMany(Location, { foreignKey: "bus_id" });
 // Driver relationships
 Driver.belongsTo(Company, { foreignKey: "company_id" });
 Driver.belongsTo(User, { foreignKey: "user_id" });
+Driver.hasMany(Bus, { foreignKey: "driver_id", as: "buses" });
 Driver.hasMany(DriverAssignment, { foreignKey: "driver_id" });
 Driver.hasMany(Journal, { foreignKey: "driver_id" });
 Driver.hasMany(Schedule, { foreignKey: "driver_id" });

@@ -22,12 +22,14 @@ interface CommuterDashboardProps {
 export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
   const { user, accessToken, signOut } = useAuth();
   const [schedules, setSchedules] = useState<any[]>([]);
+  const [filteredSchedules, setFilteredSchedules] = useState<any[]>([]);
   const [tickets, setTickets] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [buses, setBuses] = useState<any[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [searchFrom, setSearchFrom] = useState('');
   const [searchTo, setSearchTo] = useState('');
   const [selectedSchedule, setSelectedSchedule] = useState<any>(null);
@@ -43,6 +45,53 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
     const interval = setInterval(fetchLocations, 5000);
     return () => clearInterval(interval);
   }, [accessToken]);
+
+  // Auto-search with debouncing when from/to fields change
+  useEffect(() => {
+    if (!searchFrom || !searchTo) {
+      setFilteredSchedules([]);
+      return;
+    }
+
+    // Set a timer to debounce the search (wait 800ms after user stops typing)
+    const searchTimer = setTimeout(() => {
+      performSearch();
+    }, 800);
+
+    // Cleanup timer if component unmounts or search fields change again
+    return () => clearTimeout(searchTimer);
+  }, [searchFrom, searchTo]);
+
+  async function performSearch() {
+    setSearchLoading(true);
+    try {
+      const response = await fetch(
+        `${API_URL}/schedules/search?from=${encodeURIComponent(searchFrom)}&to=${encodeURIComponent(searchTo)}`,
+        {
+          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setFilteredSchedules(data.schedules);
+      } else {
+        setFilteredSchedules([]);
+      }
+    } catch (error) {
+      setFilteredSchedules([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  }
+
+  async function searchSchedulesByRoute() {
+    if (!searchFrom || !searchTo) {
+      alert('Please enter both departure and destination cities');
+      return;
+    }
+    performSearch();
+  }
 
   async function fetchData() {
     try {
@@ -177,12 +226,6 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
     }
   }
 
-  const filteredSchedules = schedules.filter((s: any) => {
-    const matchesFrom = !searchFrom || s.routeFrom.toLowerCase().includes(searchFrom.toLowerCase());
-    const matchesTo = !searchTo || s.routeTo.toLowerCase().includes(searchTo.toLowerCase());
-    return matchesFrom && matchesTo && s.status === 'scheduled' && s.seatsAvailable > 0;
-  });
-
   // Sort tickets by creation date (newest first) and limit to last 5 if not showing all
   const sortedTickets = [...tickets].sort((a, b) => {
     const dateA = new Date(a.createdAt || 0).getTime();
@@ -286,30 +329,33 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                 <CardDescription>Find and book your bus tickets</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>From</Label>
                     <Input
-                      placeholder="Departure city"
+                      placeholder="Departure city (e.g., Kigali)"
                       value={searchFrom}
                       onChange={(e) => setSearchFrom(e.target.value)}
+                      autoComplete="off"
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>To</Label>
                     <Input
-                      placeholder="Destination city"
+                      placeholder="Destination city (e.g., Musanze)"
                       value={searchTo}
                       onChange={(e) => setSearchTo(e.target.value)}
+                      autoComplete="off"
                     />
                   </div>
-                  <div className="flex items-end">
-                    <Button className="w-full bg-[#0077B6] hover:bg-[#005a8c]">
-                      <Search className="w-4 h-4 mr-2" />
-                      Search
-                    </Button>
-                  </div>
                 </div>
+                
+                {searchLoading && (searchFrom || searchTo) && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <div className="animate-spin h-4 w-4 border-2 border-[#0077B6] border-t-transparent rounded-full"></div>
+                    Searching...
+                  </div>
+                )}
 
                 {(searchFrom || searchTo) && (
                   <div className="space-y-4 pt-4 border-t">

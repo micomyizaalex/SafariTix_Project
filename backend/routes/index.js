@@ -5,12 +5,18 @@ const userRoutes = require('./users');
 const companyRoutes = require('./companies');
 const adminRoutes = require('./admin');
 const companySelfRoutes = require('./company');
-const Notification = require("./notifications")
+const notificationRoutes = require('./notifications');
+const publicController = require('../controllers/publicController');
+
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
 router.use('/companies', companyRoutes);
 router.use('/admin', adminRoutes);
 router.use('/company', companySelfRoutes);
-router.use('/notifications', Notification);
+router.use('/notifications', notificationRoutes);
+
+// Public endpoints (no authentication required)
+router.get('/schedules', publicController.getAvailableSchedules);
+router.get('/schedules/search', publicController.searchSchedules);
 
 module.exports = router;
