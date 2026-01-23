@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { createClient, API_URL } from '../utils/supabase-client';
+import { supabase, API_URL } from '../utils/supabase-client';
 import { publicAnonKey } from '../utils/supabase/info';
 
 interface User {
@@ -26,7 +26,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
 
   useEffect(() => {
     checkUser();
