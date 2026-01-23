@@ -54,7 +54,7 @@ export function Login() {
 
       setSuccessMessage('Login successful!');
 
-      // Persist token/user for subsequent requests
+      // Persist token/user for subsequent requests and perform a full redirect
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
 
@@ -66,7 +66,8 @@ export function Login() {
         driver: '/dashboard/driver'
       };
 
-      navigate(rolePath[role] || '/', { replace: true });
+      // Do a full page navigation so AuthProvider re-initializes from localStorage
+      window.location.href = rolePath[role] || '/';
 
     } catch (err: any) {
       setError(err.message || 'Login failed');

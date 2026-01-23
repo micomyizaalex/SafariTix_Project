@@ -32,6 +32,7 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
   const [showAddBus, setShowAddBus] = useState(false);
   const [showAddSchedule, setShowAddSchedule] = useState(false);
   const [showAddDriver, setShowAddDriver] = useState(false);
+  const [showAssignDriver, setShowAssignDriver] = useState(false);
   const [showSubscriptionPayment, setShowSubscriptionPayment] = useState(false);
   const [subscriptionPaid, setSubscriptionPaid] = useState(false);
   const [showAllTickets, setShowAllTickets] = useState(false);
@@ -47,6 +48,10 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
   const [model, setModel] = useState('');
   const [selectedDriver, setSelectedDriver] = useState('');
 
+  // Assign driver dialog
+  const [assignBusId, setAssignBusId] = useState('');
+  const [assignDriverId, setAssignDriverId] = useState('');
+
   // Add schedule form
   const [selectedBus, setSelectedBus] = useState('');
   const [routeFrom, setRouteFrom] = useState('');
@@ -58,12 +63,13 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
   const [scheduleDriver, setScheduleDriver] = useState('');
 
   useEffect(() => {
+    if (!accessToken) return;
     fetchData();
-  }, []);
+  }, [accessToken]);
 
   async function fetchData() {
     try {
-      const [companyRes, busesRes, schedulesRes, ticketsRes] = await Promise.all([
+      const [companyRes, busesRes, schedulesRes, ticketsRes, driversRes] = await Promise.all([
         fetch(`${API_URL}/company`, {
           headers: { 'Authorization': `Bearer ${accessToken}` }
         }),
@@ -74,6 +80,9 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
           headers: { 'Authorization': `Bearer ${accessToken}` }
         }),
         fetch(`${API_URL}/company/tickets`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        }),
+        fetch(`${API_URL}/company/drivers`, {
           headers: { 'Authorization': `Bearer ${accessToken}` }
         })
       ]);
@@ -99,14 +108,10 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
         setTickets(data.tickets);
       }
 
-      // Mock drivers for now (in production, fetch from backend)
-      const mockDrivers = [
-        { id: '1', name: 'John Mukiza', license: 'DL-001234', phone: '+250788123456', available: true },
-        { id: '2', name: 'Peter Uwase', license: 'DL-002345', phone: '+250788234567', available: true },
-        { id: '3', name: 'Grace Umutoni', license: 'DL-003456', phone: '+250788345678', available: false },
-        { id: '4', name: 'David Niyonzima', license: 'DL-004567', phone: '+250788456789', available: true }
-      ];
-      setDrivers(mockDrivers);
+      if (driversRes.ok) {
+        const data = await driversRes.json();
+        setDrivers(data.drivers);
+      }
     } catch (error) {
       // Network errors are expected if backend isn't fully configured - handle silently
     } finally {
@@ -144,6 +149,31 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
       }
     } catch (error) {
       // Network errors are expected if backend endpoint doesn't exist yet - handle gracefully
+      alert('Unable to connect to server. Please check your connection or try again later.');
+    }
+  }
+
+  async function handleAssignDriver(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API_URL}/company/buses/${assignBusId}/assign-driver`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ driverId: assignDriverId || null })
+      });
+
+      if (res.ok) {
+        setShowAssignDriver(false);
+        setAssignBusId('');
+        setAssignDriverId('');
+        await fetchData();
+      } else {
+        alert('Unable to assign driver. Please ensure the backend is properly configured.');
+      }
+    } catch (error) {
       alert('Unable to connect to server. Please check your connection or try again later.');
     }
   }
@@ -684,6 +714,7 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
                       <TableHead>Capacity</TableHead>
                       <TableHead>Driver</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -697,6 +728,19 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
                           <TableCell>{driver?.name || 'Unassigned'}</TableCell>
                           <TableCell>
                             <Badge className="bg-[#27AE60]">{bus.status}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setAssignBusId(bus.id);
+                                setAssignDriverId(bus.driverId || '');
+                                setShowAssignDriver(true);
+                              }}
+                            >
+                              {bus.driverId ? 'Change Driver' : 'Assign Driver'}
+                            </Button>
                           </TableCell>
                         </TableRow>
                       );
@@ -1047,6 +1091,39 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Assign Driver Dialog */}
+      <Dialog open={showAssignDriver} onOpenChange={setShowAssignDriver}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Assign Driver</DialogTitle>
+            <DialogDescription>Select a driver to assign to this bus.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAssignDriver} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="assign-driver">Driver</Label>
+              <Select value={assignDriverId || 'none'} onValueChange={(val) => setAssignDriverId(val === 'none' ? '' : val)}>
+                <SelectTrigger id="assign-driver">
+                  <SelectValue placeholder="Select a driver" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <span className="text-muted-foreground">⚠️ No driver assigned</span>
+                  </SelectItem>
+                  {drivers.map((driver) => (
+                    <SelectItem key={driver.id} value={driver.id}>
+                      {driver.name} ({driver.license})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button type="submit" className="w-full bg-[#0077B6] hover:bg-[#005a8c]">
+              Save
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -38,6 +38,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.access_token) {
         setAccessToken(session.access_token);
         await fetchUserData(session.access_token);
+        return;
+      }
+
+      // Fallback: if an auth token was stored in localStorage by the app (e.g., native backend login), use it
+      const storedToken = localStorage.getItem('token');
+      const storedUser = localStorage.getItem('user');
+      if (storedToken) {
+        setAccessToken(storedToken);
+        if (storedUser) {
+          try {
+            setUser(JSON.parse(storedUser));
+          } catch (err) {
+            // ignore parse errors
+          }
+        } else {
+          await fetchUserData(storedToken);
+        }
       }
     } catch (error) {
       // Session check errors are handled silently

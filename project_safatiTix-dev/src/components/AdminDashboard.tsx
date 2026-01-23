@@ -21,10 +21,11 @@ export function AdminDashboard({ onSettings }: AdminDashboardProps) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!accessToken) return;
     fetchData();
     const interval = setInterval(fetchLocations, 5000); // Update locations every 5s
     return () => clearInterval(interval);
-  }, []);
+  }, [accessToken]);
 
   async function fetchData() {
     try {

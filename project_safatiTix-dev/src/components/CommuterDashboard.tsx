@@ -38,10 +38,11 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
   const [recentTicket, setRecentTicket] = useState<any | null>(null);
 
   useEffect(() => {
+    // fetchData can run on mount for public endpoints; protected endpoints are skipped if no accessToken
     fetchData();
     const interval = setInterval(fetchLocations, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [accessToken]);
 
   async function fetchData() {
     try {
@@ -49,18 +50,12 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
         fetch(`${API_URL}/schedules`, {
           headers: { 'Authorization': `Bearer ${publicAnonKey}` }
         }).catch(() => null),
-        fetch(`${API_URL}/tickets`, {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
-        }).catch(() => null),
+        (accessToken ? fetch(`${API_URL}/tickets`, { headers: { 'Authorization': `Bearer ${accessToken}` } }).catch(() => null) : Promise.resolve(null)),
         fetch(`${API_URL}/tracking`, {
           headers: { 'Authorization': `Bearer ${publicAnonKey}` }
         }).catch(() => null),
-        fetch(`${API_URL}/admin/companies`, {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
-        }).catch(() => null),
-        fetch(`${API_URL}/company/buses`, {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
-        }).catch(() => null)
+        (accessToken ? fetch(`${API_URL}/admin/companies`, { headers: { 'Authorization': `Bearer ${accessToken}` } }).catch(() => null) : Promise.resolve(null)),
+        (accessToken ? fetch(`${API_URL}/company/buses`, { headers: { 'Authorization': `Bearer ${accessToken}` } }).catch(() => null) : Promise.resolve(null))
       ]);
 
       if (schedulesRes && schedulesRes.ok) {
