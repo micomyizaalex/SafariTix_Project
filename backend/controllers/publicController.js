@@ -107,11 +107,11 @@ const searchSchedules = async (req, res) => {
           attributes: ['id', 'plate_number', 'company_id', 'driver_id'],
           include: [
             {
-              model: require('../models').Company,
+              model: Company,
               attributes: ['id', 'name']
             },
             {
-              model: require('../models').Driver,
+              model: Driver,
               attributes: ['id', 'name']
             }
           ]

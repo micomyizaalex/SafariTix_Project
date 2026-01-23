@@ -367,7 +367,6 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                       <p className="text-center text-muted-foreground py-8">No schedules found</p>
                     ) : (
                       filteredSchedules.map((schedule) => {
-                        const { company, bus, driver } = getScheduleDetails(schedule);
                         return (
                           <Card key={schedule.id} className="hover:shadow-lg transition-shadow border-l-4 border-l-[#0077B6]">
                             <CardContent className="p-6">
@@ -376,7 +375,7 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                                   <div className="flex items-center justify-between">
                                     <div>
                                       <p className="text-sm text-muted-foreground">Transport Company</p>
-                                      <p className="font-semibold text-lg">{company?.name || 'N/A'}</p>
+                                      <p className="font-semibold text-lg">{schedule.companyName}</p>
                                     </div>
                                     <Badge className="bg-[#0077B6] text-white">
                                       {schedule.seatsAvailable} seats left
@@ -385,28 +384,28 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
 
                                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                     <div>
-                                      <p className="text-sm text-muted-foreground">Bus Type</p>
-                                      <p className="font-semibold">
-                                        {bus?.model || 'Standard Bus'}
+                                      <p className="text-sm text-muted-foreground">Bus Plate Number</p>
+                                      <p className="font-semibold font-mono text-base">
+                                        {schedule.busPlateNumber}
                                       </p>
                                     </div>
                                     <div>
-                                      <p className="text-sm text-muted-foreground">Plate Number</p>
-                                      <p className="font-semibold font-mono">
-                                        {bus?.plateNumber || 'N/A'}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">Driver</p>
+                                      <p className="text-sm text-muted-foreground">Driver Assigned</p>
                                       <p className="font-semibold flex items-center gap-1">
                                         <Users className="w-4 h-4" />
-                                        {driver?.name || 'Not assigned'}
+                                        {schedule.driverName}
                                       </p>
                                     </div>
                                     <div>
-                                      <p className="text-sm text-muted-foreground">Capacity</p>
+                                      <p className="text-sm text-muted-foreground">Available Seats</p>
                                       <p className="font-semibold">
-                                        {bus?.capacity || schedule.totalSeats} seats
+                                        {schedule.seatsAvailable} seats
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-sm text-muted-foreground">Booked Seats</p>
+                                      <p className="font-semibold">
+                                        {schedule.bookedSeats} seats
                                       </p>
                                     </div>
                                   </div>
@@ -424,14 +423,14 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                                       <p className="text-sm text-muted-foreground">Departure Time</p>
                                       <p className="font-semibold flex items-center gap-2">
                                         <Clock className="w-4 h-4 text-[#0077B6]" />
-                                        {schedule.departureTime}
+                                        {new Date(schedule.departureTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
                                       </p>
                                     </div>
                                     <div>
                                       <p className="text-sm text-muted-foreground">Travel Date</p>
                                       <p className="font-semibold flex items-center gap-2">
                                         <Calendar className="w-4 h-4 text-[#0077B6]" />
-                                        {schedule.date}
+                                        {new Date(schedule.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
                                       </p>
                                     </div>
                                   </div>
