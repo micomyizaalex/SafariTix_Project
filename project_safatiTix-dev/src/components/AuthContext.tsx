@@ -98,9 +98,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      // ignore errors from supabase signOut
+    }
+    // Clear local auth state and any stored tokens
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
     setUser(null);
     setAccessToken(null);
+
+    // Redirect to login page
+    try {
+      window.location.href = '/login';
+    } catch (err) {
+      // ignore
+    }
   }
 
   return (
