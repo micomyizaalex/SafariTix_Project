@@ -1,0 +1,109 @@
+const { Sequelize } = require('sequelize');
+
+const User = require('./User')
+const Notification = require("./Notification")
+const sequelize = require("../config/database");
+const Company = require("./Company");
+const Bus = require("./Bus");
+const Driver = require("./Driver");
+const DriverAssignment = require("./DriverAssignment");
+const Journal = require("./Journal");
+const Route = require("./Route");
+const Schedule = require("./Schedule");
+const Ticket = require("./Ticket");
+const Location = require("./Location");
+
+// ============================================
+// RELATIONSHIPS / ASSOCIATIONS
+// ============================================
+
+// User relationships
+User.hasMany(Company, { foreignKey: "owner_id", as: "ownedCompanies" });
+User.hasMany(Company, { foreignKey: "approved_by", as: "approvedCompanies" });
+User.hasMany(Driver, { foreignKey: "user_id" });
+User.hasMany(DriverAssignment, { foreignKey: "assigned_by" });
+User.hasMany(Schedule, { foreignKey: "created_by" });
+User.hasMany(Ticket, { foreignKey: "passenger_id" });
+User.hasMany(Notification, { foreignKey: "user_id" });
+User.belongsTo(Company, { foreignKey: "company_id", as: "company" });
+
+// Company relationships
+Company.belongsTo(User, { foreignKey: "owner_id", as: "owner" });
+Company.belongsTo(User, { foreignKey: "approved_by", as: "approver" });
+Company.hasMany(Bus, { foreignKey: "company_id" });
+Company.hasMany(Driver, { foreignKey: "company_id" });
+Company.hasMany(DriverAssignment, { foreignKey: "company_id" });
+Company.hasMany(Journal, { foreignKey: "company_id" });
+Company.hasMany(Route, { foreignKey: "company_id" });
+Company.hasMany(Schedule, { foreignKey: "company_id" });
+Company.hasMany(Ticket, { foreignKey: "company_id" });
+Company.hasMany(User, { foreignKey: "company_id", as: "employees" });
+
+// Bus relationships
+Bus.belongsTo(Company, { foreignKey: "company_id" });
+Bus.hasMany(DriverAssignment, { foreignKey: "bus_id" });
+Bus.hasMany(Journal, { foreignKey: "bus_id" });
+Bus.hasMany(Schedule, { foreignKey: "bus_id" });
+Bus.hasMany(Location, { foreignKey: "bus_id" });
+
+// Driver relationships
+Driver.belongsTo(Company, { foreignKey: "company_id" });
+Driver.belongsTo(User, { foreignKey: "user_id" });
+Driver.hasMany(DriverAssignment, { foreignKey: "driver_id" });
+Driver.hasMany(Journal, { foreignKey: "driver_id" });
+Driver.hasMany(Schedule, { foreignKey: "driver_id" });
+Driver.hasMany(Location, { foreignKey: "driver_id" });
+
+// DriverAssignment relationships
+DriverAssignment.belongsTo(Bus, { foreignKey: "bus_id" });
+DriverAssignment.belongsTo(Driver, { foreignKey: "driver_id" });
+DriverAssignment.belongsTo(Company, { foreignKey: "company_id" });
+DriverAssignment.belongsTo(User, { foreignKey: "assigned_by" });
+
+// Route relationships
+Route.belongsTo(Company, { foreignKey: "company_id" });
+Route.hasMany(Schedule, { foreignKey: "route_id" });
+
+// Schedule relationships
+Schedule.belongsTo(Bus, { foreignKey: "bus_id" });
+Schedule.belongsTo(Route, { foreignKey: "route_id" });
+Schedule.belongsTo(Driver, { foreignKey: "driver_id" });
+Schedule.belongsTo(Company, { foreignKey: "company_id" });
+Schedule.belongsTo(User, { foreignKey: "created_by" });
+Schedule.hasMany(Journal, { foreignKey: "schedule_id" });
+Schedule.hasMany(Ticket, { foreignKey: "schedule_id" });
+Schedule.hasMany(Location, { foreignKey: "schedule_id" });
+
+// Ticket relationships
+Ticket.belongsTo(User, { foreignKey: "passenger_id", as: "passenger" });
+Ticket.belongsTo(Schedule, { foreignKey: "schedule_id" });
+Ticket.belongsTo(Company, { foreignKey: "company_id" });
+
+// Journal relationships
+Journal.belongsTo(Bus, { foreignKey: "bus_id" });
+Journal.belongsTo(Driver, { foreignKey: "driver_id" });
+Journal.belongsTo(Schedule, { foreignKey: "schedule_id" });
+Journal.belongsTo(Company, { foreignKey: "company_id" });
+
+// Location relationships
+Location.belongsTo(Bus, { foreignKey: "bus_id" });
+Location.belongsTo(Driver, { foreignKey: "driver_id" });
+Location.belongsTo(Schedule, { foreignKey: "schedule_id" });
+
+// Notification relationships
+Notification.belongsTo(User, { foreignKey: "user_id", as: "user" });
+
+module.exports = {
+  sequelize,
+  User,
+  Notification,
+  Company,
+  Bus,
+  Driver,
+  DriverAssignment,
+  Journal,
+  Route,
+  Schedule,
+  Ticket,
+  Location
+}

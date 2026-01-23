@@ -1,0 +1,39 @@
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
+
+const Ticket = sequelize.define(
+  "Ticket",
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+
+    passenger_id: { type: DataTypes.UUID, allowNull: false },
+    schedule_id: { type: DataTypes.UUID, allowNull: false },
+    company_id: { type: DataTypes.UUID, allowNull: false },
+
+    seat_number: { type: DataTypes.STRING, allowNull: false },
+    booking_ref: { type: DataTypes.STRING, allowNull: false, unique: true },
+    qr_code_url: DataTypes.TEXT,
+    price: { type: DataTypes.DECIMAL, allowNull: false },
+
+    status: {
+      type: DataTypes.ENUM("booked", "checked_in", "cancelled", "refunded"),
+      defaultValue: "booked",
+    },
+
+    booked_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+    checked_in_at: { type: DataTypes.DATE },
+  },
+  {
+    tableName: "tickets",
+    timestamps: true,
+    underscored: true,
+  }
+);
+
+
+
+module.exports = Ticket;
