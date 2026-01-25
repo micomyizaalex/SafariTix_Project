@@ -18,6 +18,7 @@ async function syncDatabase() {
     console.log('   - Routes');
     console.log('   - Schedules');
     console.log('   - Tickets');
+    console.log('   - Payments');
     console.log('   - Journals');
     console.log('   - Locations');
     console.log('   - Notifications');
@@ -31,7 +32,7 @@ async function syncDatabase() {
     console.log('\n📊 Database Schema Summary:');
     console.log('   - Database:', sequelize.config.database || 'neondb');
     console.log('   - Dialect:', sequelize.getDialect());
-    console.log('   - Tables created: 12');
+    console.log('   - Tables created: 13');
     
     console.log('\n💡 Next steps:');
     console.log('   1. Run: node seeders/createAdmin.js (to create admin user)');

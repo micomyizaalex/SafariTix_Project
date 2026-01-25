@@ -6,6 +6,7 @@ const companyRoutes = require('./companies');
 const adminRoutes = require('./admin');
 const companySelfRoutes = require('./company');
 const notificationRoutes = require('./notifications');
+const paymentRoutes = require('./payments');
 const publicController = require('../controllers/publicController');
 const auth = require('../middleware/authenticate');
 
@@ -15,13 +16,23 @@ router.use('/companies', companyRoutes);
 router.use('/admin', adminRoutes);
 router.use('/company', companySelfRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/payments', paymentRoutes);
 
 // Public endpoints (no authentication required)
 router.get('/schedules', publicController.getAvailableSchedules);
 router.get('/schedules/search', publicController.searchSchedules);
+// New search endpoint using pg Pool with parameterized SQL queries (production-ready)
+router.get('/schedules/search-pg', publicController.searchSchedulesPg);
+router.post('/schedules/search-pg', publicController.searchSchedulesPg);
+// Test database connection (for debugging)
+router.get('/test-db', publicController.testDbConnection);
 router.get('/tracking', publicController.getLocations);
 
 // User endpoints (authentication required)
 router.get('/tickets', auth, publicController.getTickets);
+router.get('/tickets/:ticketId', auth, publicController.getTicketById);
+
+// Public ticket scanning (for inspectors/drivers)
+router.get('/tickets/scan/:ticketId', publicController.scanTicket);
 
 module.exports = router;

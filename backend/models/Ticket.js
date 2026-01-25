@@ -13,6 +13,7 @@ const Ticket = sequelize.define(
     passenger_id: { type: DataTypes.UUID, allowNull: false },
     schedule_id: { type: DataTypes.UUID, allowNull: false },
     company_id: { type: DataTypes.UUID, allowNull: false },
+    payment_id: { type: DataTypes.UUID, allowNull: true },
 
     seat_number: { type: DataTypes.STRING, allowNull: false },
     booking_ref: { type: DataTypes.STRING, allowNull: false, unique: true },

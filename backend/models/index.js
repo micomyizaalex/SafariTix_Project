@@ -12,6 +12,7 @@ const Route = require("./Route");
 const Schedule = require("./Schedule");
 const Ticket = require("./Ticket");
 const Location = require("./Location");
+const Payment = require("./Payment");
 
 // ============================================
 // RELATIONSHIPS / ASSOCIATIONS
@@ -76,10 +77,16 @@ Schedule.hasMany(Journal, { foreignKey: "schedule_id" });
 Schedule.hasMany(Ticket, { foreignKey: "schedule_id" });
 Schedule.hasMany(Location, { foreignKey: "schedule_id" });
 
+// Payment relationships
+Payment.belongsTo(User, { foreignKey: "user_id" });
+Payment.belongsTo(Schedule, { foreignKey: "schedule_id" });
+Payment.hasMany(Ticket, { foreignKey: "payment_id" });
+
 // Ticket relationships
 Ticket.belongsTo(User, { foreignKey: "passenger_id", as: "passenger" });
 Ticket.belongsTo(Schedule, { foreignKey: "schedule_id" });
 Ticket.belongsTo(Company, { foreignKey: "company_id" });
+Ticket.belongsTo(Payment, { foreignKey: "payment_id" });
 
 // Journal relationships
 Journal.belongsTo(Bus, { foreignKey: "bus_id" });
@@ -107,5 +114,6 @@ module.exports = {
   Route,
   Schedule,
   Ticket,
-  Location
+  Location,
+  Payment
 }

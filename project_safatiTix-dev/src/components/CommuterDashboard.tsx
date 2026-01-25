@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
-import { API_URL } from '../utils/supabase-client';
+import { API_URL, supabase } from '../utils/supabase-client';
 import { publicAnonKey } from '../utils/supabase/info';
 import { ThemeToggle } from './ThemeToggle';
 import { PaymentModal } from './PaymentModal';
@@ -38,6 +38,7 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showAllTickets, setShowAllTickets] = useState(false);
   const [recentTicket, setRecentTicket] = useState<any | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   useEffect(() => {
     // fetchData can run on mount for public endpoints; protected endpoints are skipped if no accessToken
@@ -62,23 +63,72 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
     return () => clearTimeout(searchTimer);
   }, [searchFrom, searchTo]);
 
+  /**
+   * Search schedules using the new PostgreSQL-based backend endpoint
+   * Uses parameterized SQL queries via /api/schedules/search-pg
+   */
   async function performSearch() {
+    if (!searchFrom || !searchTo) {
+      setSearchError('Please enter both From and To');
+      setFilteredSchedules([]);
+      return;
+    }
+
+    setSearchError(null);
     setSearchLoading(true);
+    
     try {
+      // Call the new backend endpoint using pg Pool
       const response = await fetch(
-        `${API_URL}/schedules/search?from=${encodeURIComponent(searchFrom)}&to=${encodeURIComponent(searchTo)}`,
+        `${API_URL}/schedules/search-pg?from=${encodeURIComponent(searchFrom.trim())}&to=${encodeURIComponent(searchTo.trim())}`,
         {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
         }
       );
 
-      if (response.ok) {
-        const data = await response.json();
-        setFilteredSchedules(data.schedules);
-      } else {
-        setFilteredSchedules([]);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.message || errorData.error || `HTTP ${response.status}: Failed to search schedules`;
+        console.error('Search API error:', errorData);
+        throw new Error(errorMessage);
       }
-    } catch (error) {
+
+      const data = await response.json();
+
+      // Handle empty results
+      if (!data.schedules || data.schedules.length === 0) {
+        setFilteredSchedules([]);
+        setSearchError('No schedules available for this route');
+        return;
+      }
+
+      // Map the response to match the existing UI structure
+      const mapped = data.schedules.map((s: any) => ({
+        id: s.id,
+        routeFrom: s.from_location,
+        routeTo: s.to_location,
+        departureTime: s.departure_time,
+        scheduleDate: s.schedule_date, // Travel date from database
+        seatsAvailable: s.available_seats,
+        bookedSeats: s.booked_seats || 0,
+        price: Number(s.price) || 0,
+        companyName: s.company_name || 'N/A',
+        companyId: s.company_id,
+        busPlateNumber: s.bus_plate_number || 'N/A',
+        driverName: s.driver_name || 'No driver assigned',
+        status: 'scheduled'
+      }));
+
+      setFilteredSchedules(mapped);
+      setSearchError(null);
+    } catch (error: any) {
+      console.error('Schedule search error:', error);
+      // Show user-friendly error message
+      const errorMessage = error.message || 'Unable to fetch schedules right now. Please try again.';
+      setSearchError(errorMessage);
       setFilteredSchedules([]);
     } finally {
       setSearchLoading(false);
@@ -169,49 +219,15 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
   }
 
   async function handlePaymentSuccess() {
-    if (!selectedSchedule) return;
-
-    try {
-      // Book multiple tickets
-      const bookingPromises = [];
-      for (let i = 0; i < numTickets; i++) {
-        bookingPromises.push(
-          fetch(`${API_URL}/tickets/book`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              scheduleId: selectedSchedule.id,
-              seatNumber: i + 1 // Auto-assign seat numbers
-            })
-          })
-        );
-      }
-
-      const results = await Promise.all(bookingPromises);
-      const allSuccess = results.every(res => res.ok);
-
-      if (allSuccess) {
-        // Parse first ticket response to display
-        const firstResponse = await results[0].json().catch(() => null);
-        if (firstResponse?.ticket) {
-          setRecentTicket(firstResponse.ticket);
-        }
-        setShowPaymentModal(false);
-        setShowSuccessModal(true);
-        await fetchData();
-        
-        setTimeout(() => {
-          setShowSuccessModal(false);
-          setSelectedSchedule(null);
-          setNumTickets(1);
-        }, 3000);
-      }
-    } catch (error) {
-      // Ticket booking errors are handled silently
-    }
+    // Payment and booking are now handled in PaymentModal
+    // Just refresh data and reset state
+    setShowPaymentModal(false);
+    setSelectedSchedule(null);
+    setNumTickets(1);
+    await fetchData();
+    
+    // Switch to My Tickets tab to show the new ticket
+    // Note: You may need to add tab switching logic if you have tab state
   }
 
   // Sort tickets by creation date (newest first) and limit to last 5 if not showing all
@@ -345,6 +361,12 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                   </div>
                 )}
 
+                {searchError && (
+                  <div className="text-sm text-red-600 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md px-3 py-2">
+                    {searchError}
+                  </div>
+                )}
+
                 {!searchFrom && !searchTo && (
                   <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-6 rounded-lg text-center space-y-2">
                     <Bus className="w-12 h-12 mx-auto text-[#0077B6]" />
@@ -376,7 +398,40 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                     ) : (
                       filteredSchedules.map((schedule) => {
                         const isLowSeats = schedule.seatsAvailable <= 5 && schedule.seatsAvailable > 0;
-                        const seatPercentage = schedule.seatsAvailable / (schedule.seatsAvailable + schedule.bookedSeats) * 100;
+                        const totalSeats = schedule.seatsAvailable + schedule.bookedSeats;
+                        const seatPercentage = totalSeats > 0 ? (schedule.seatsAvailable / totalSeats) * 100 : 0;
+                        
+                        // Format travel date safely
+                        const formatTravelDate = (dateStr: string | null | undefined) => {
+                          if (!dateStr) return 'N/A';
+                          try {
+                            const date = new Date(dateStr);
+                            if (isNaN(date.getTime())) return 'N/A';
+                            return date.toLocaleDateString('en-US', { 
+                              year: 'numeric', 
+                              month: 'short', 
+                              day: 'numeric' 
+                            });
+                          } catch {
+                            return 'N/A';
+                          }
+                        };
+                        
+                        // Format departure time safely
+                        const formatDepartureTime = (timeStr: string | null | undefined) => {
+                          if (!timeStr) return 'N/A';
+                          try {
+                            const date = new Date(timeStr);
+                            if (isNaN(date.getTime())) return 'N/A';
+                            return date.toLocaleTimeString('en-US', { 
+                              hour: '2-digit', 
+                              minute: '2-digit', 
+                              hour12: true 
+                            });
+                          } catch {
+                            return 'N/A';
+                          }
+                        };
                         
                         return (
                           <Card key={schedule.id} className="hover:shadow-lg transition-shadow border-l-4 border-l-[#0077B6]">
@@ -397,20 +452,24 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                                     <div>
                                       <p className="text-sm text-muted-foreground">Bus Plate Number</p>
                                       <p className="font-semibold font-mono text-base">
-                                        {schedule.busPlateNumber}
+                                        {schedule.busPlateNumber && schedule.busPlateNumber !== 'N/A' 
+                                          ? schedule.busPlateNumber 
+                                          : 'Not assigned'}
                                       </p>
                                     </div>
                                     <div>
                                       <p className="text-sm text-muted-foreground">Driver Assigned</p>
                                       <p className="font-semibold flex items-center gap-1">
                                         <Users className="w-4 h-4" />
-                                        {schedule.driverName}
+                                        {schedule.driverName && schedule.driverName !== 'No driver assigned'
+                                          ? schedule.driverName
+                                          : <span className="text-muted-foreground italic">No driver assigned</span>}
                                       </p>
                                     </div>
                                     <div>
                                       <p className="text-sm text-muted-foreground">Available Seats</p>
                                       <p className={`font-semibold ${isLowSeats ? 'text-orange-600' : 'text-green-600'}`}>
-                                        {schedule.seatsAvailable} / {schedule.seatsAvailable + schedule.bookedSeats} seats
+                                        {schedule.seatsAvailable} / {totalSeats} seats
                                       </p>
                                       <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mt-1">
                                         <div 
@@ -444,14 +503,14 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                                       <p className="text-sm text-muted-foreground">Departure Time</p>
                                       <p className="font-semibold flex items-center gap-2">
                                         <Clock className="w-4 h-4 text-[#0077B6]" />
-                                        {new Date(schedule.departureTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                        {formatDepartureTime(schedule.departureTime)}
                                       </p>
                                     </div>
                                     <div>
                                       <p className="text-sm text-muted-foreground">Travel Date</p>
                                       <p className="font-semibold flex items-center gap-2">
                                         <Calendar className="w-4 h-4 text-[#0077B6]" />
-                                        {new Date(schedule.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                                        {formatTravelDate(schedule.scheduleDate || schedule.departureTime)}
                                       </p>
                                     </div>
                                   </div>
@@ -533,11 +592,13 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>QR Code</TableHead>
+                        <TableHead>Route</TableHead>
+                        <TableHead>Departure</TableHead>
                         <TableHead>Seat</TableHead>
                         <TableHead>Price</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Scanned</TableHead>
+                        <TableHead>Payment Method</TableHead>
+                        <TableHead>Payment Status</TableHead>
+                        <TableHead>Ticket Status</TableHead>
                         <TableHead>View</TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
@@ -545,15 +606,74 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                     <TableBody>
                       {displayedTickets.map((ticket) => (
                         <TableRow key={ticket.id}>
-                          <TableCell className="font-mono">{ticket.qrCode}</TableCell>
-                          <TableCell>Seat {ticket.seatNumber}</TableCell>
-                          <TableCell>RWF {ticket.price}</TableCell>
                           <TableCell>
-                            <Badge variant={ticket.status === 'cancelled' ? 'secondary' : 'default'}>
-                              {ticket.status}
+                            <div className="flex items-center gap-1">
+                              <span className="font-semibold">{ticket.routeFrom}</span>
+                              <ArrowRight className="w-3 h-3 text-muted-foreground" />
+                              <span className="font-semibold">{ticket.routeTo}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm">
+                              {ticket.departureTime && (
+                                <div className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3 text-muted-foreground" />
+                                  {new Date(ticket.departureTime).toLocaleTimeString('en-US', { 
+                                    hour: '2-digit', 
+                                    minute: '2-digit', 
+                                    hour12: true 
+                                  })}
+                                </div>
+                              )}
+                              {ticket.scheduleDate && (
+                                <div className="flex items-center gap-1 mt-1 text-muted-foreground">
+                                  <Calendar className="w-3 h-3" />
+                                  {new Date(ticket.scheduleDate).toLocaleDateString('en-US', { 
+                                    month: 'short', 
+                                    day: 'numeric' 
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>Seat {ticket.seatNumber}</TableCell>
+                          <TableCell>RWF {ticket.price?.toLocaleString() || '0'}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="capitalize">
+                              {ticket.paymentMethod === 'mobile_money' ? 'MTN MoMo' :
+                               ticket.paymentMethod === 'airtel_money' ? 'Airtel Money' :
+                               ticket.paymentMethod === 'card_payment' ? 'Card' :
+                               ticket.paymentMethod || 'N/A'}
                             </Badge>
                           </TableCell>
-                          <TableCell>{ticket.scanned ? '✓ Yes' : '— No'}</TableCell>
+                          <TableCell>
+                            <Badge 
+                              className={
+                                ticket.paymentStatus === 'SUCCESS' ? 'bg-[#27AE60] text-white' :
+                                ticket.paymentStatus === 'PENDING' ? 'bg-orange-500 text-white' :
+                                'bg-red-500 text-white'
+                              }
+                            >
+                              {ticket.paymentStatus || 'N/A'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge 
+                              variant={
+                                ticket.status === 'booked' ? 'default' :
+                                ticket.status === 'checked_in' ? 'default' :
+                                ticket.status === 'cancelled' ? 'secondary' :
+                                'outline'
+                              }
+                              className={
+                                ticket.status === 'booked' ? 'bg-[#0077B6] text-white' :
+                                ticket.status === 'checked_in' ? 'bg-[#27AE60] text-white' :
+                                ''
+                              }
+                            >
+                              {ticket.status || 'N/A'}
+                            </Badge>
+                          </TableCell>
                           <TableCell>
                             <Button
                               variant="outline"
@@ -578,7 +698,7 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                       ))}
                       {hasMoreTickets && (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center">
+                          <TableCell colSpan={9} className="text-center">
                             {showAllTickets ? (
                               <Button
                                 variant="outline"
@@ -657,21 +777,34 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
       </div>
 
       {/* Payment Modal */}
-      <PaymentModal
-        open={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
-        amount={selectedSchedule ? selectedSchedule.price * numTickets : 0}
-        onSuccess={handlePaymentSuccess}
-        title="Complete Your Booking"
-        description={`Pay for ${numTickets} ticket${numTickets > 1 ? 's' : ''}`}
-        busDetails={selectedSchedule ? {
-          route: `${selectedSchedule.routeFrom} → ${selectedSchedule.routeTo}`,
-          date: selectedSchedule.date,
-          time: selectedSchedule.departureTime,
-          company: companies.find(c => c.id === selectedSchedule.companyId)?.name || 'N/A',
-          numTickets: numTickets
-        } : undefined}
-      />
+      {selectedSchedule && (
+        <PaymentModal
+          open={showPaymentModal}
+          onClose={() => {
+            setShowPaymentModal(false);
+            setSelectedSchedule(null);
+            setNumTickets(1);
+          }}
+          amount={selectedSchedule.price * numTickets}
+          scheduleId={selectedSchedule.id}
+          numTickets={numTickets}
+          onSuccess={handlePaymentSuccess}
+          title="Complete Your Booking"
+          description={`Pay for ${numTickets} ticket${numTickets > 1 ? 's' : ''}`}
+          busDetails={{
+            route: `${selectedSchedule.routeFrom} → ${selectedSchedule.routeTo}`,
+            date: selectedSchedule.scheduleDate 
+              ? new Date(selectedSchedule.scheduleDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+              : selectedSchedule.departureTime 
+                ? new Date(selectedSchedule.departureTime).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+                : 'N/A',
+            time: selectedSchedule.departureTime 
+              ? new Date(selectedSchedule.departureTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+              : 'N/A',
+            company: selectedSchedule.companyName || 'N/A'
+          }}
+        />
+      )}
 
       {/* Success Modal */}
       {showSuccessModal && (

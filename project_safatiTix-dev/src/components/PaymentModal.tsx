@@ -4,13 +4,17 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card, CardContent } from './ui/card';
-import { CreditCard, Check, Smartphone, Phone, Receipt } from 'lucide-react';
+import { CreditCard, Check, Smartphone, Phone, Receipt, ArrowLeft, Loader2 } from 'lucide-react';
 import { Badge } from './ui/badge';
+import { useAuth } from './AuthContext';
+import { API_URL } from '../utils/supabase-client';
 
 interface PaymentModalProps {
   open: boolean;
   onClose: () => void;
   amount: number;
+  scheduleId: string;
+  numTickets: number;
   onSuccess: () => void;
   title?: string;
   description?: string;
@@ -19,16 +23,27 @@ interface PaymentModalProps {
     date?: string;
     time?: string;
     company?: string;
-    numTickets?: number;
   };
 }
 
-type PaymentMethod = 'mtn' | 'airtel' | 'card';
+type PaymentMethod = 'mobile_money' | 'airtel_money' | 'card_payment';
 
-export function PaymentModal({ open, onClose, amount, onSuccess, title, description, busDetails }: PaymentModalProps) {
-  const [step, setStep] = useState<'method' | 'details' | 'success'>('method');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('mtn');
+export function PaymentModal({ 
+  open, 
+  onClose, 
+  amount, 
+  scheduleId,
+  numTickets,
+  onSuccess, 
+  title, 
+  description, 
+  busDetails 
+}: PaymentModalProps) {
+  const { accessToken } = useAuth();
+  const [step, setStep] = useState<'method' | 'details' | 'ussd' | 'success'>('method');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('mobile_money');
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
   // Form fields
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -37,45 +52,181 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
   const [cvv, setCvv] = useState('');
   const [cardName, setCardName] = useState('');
   
-  // Transaction details
-  const [transactionId, setTransactionId] = useState('');
+  // Payment state
+  const [paymentId, setPaymentId] = useState<string | null>(null);
+  const [transactionRef, setTransactionRef] = useState<string | null>(null);
+  const [ussdCode, setUssdCode] = useState<string>('');
 
   const handleMethodSelect = (method: PaymentMethod) => {
     setPaymentMethod(method);
     setStep('details');
+    setError(null);
   };
 
-  const handlePayment = async (e: React.FormEvent) => {
+  // Step 1: Initiate payment
+  const handleInitiatePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setProcessing(true);
-    
-    // Generate transaction ID
-    const txnId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
-    setTransactionId(txnId);
-    
-    // Simulate payment processing
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setProcessing(false);
-    setStep('success');
-    
-    // Call success callback after showing success message
-    setTimeout(() => {
-      onSuccess();
-      handleClose();
-    }, 3000);
+    setError(null);
+
+    try {
+      const phoneOrCard = paymentMethod === 'card_payment' ? cardNumber : phoneNumber;
+
+      if (!phoneOrCard) {
+        setError('Please enter phone number or card number');
+        setProcessing(false);
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/payments/initiate`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          scheduleId,
+          paymentMethod,
+          phoneOrCard,
+          numTickets
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || data.error || 'Failed to initiate payment');
+      }
+
+      setPaymentId(data.payment.id);
+      setTransactionRef(data.payment.transaction_ref);
+
+      // Generate USSD code based on payment method
+      const ussdCodes = {
+        'mobile_money': '*182*1#',
+        'airtel_money': '*185*1#',
+        'card_payment': ''
+      };
+      setUssdCode(ussdCodes[paymentMethod] || '');
+
+      // Move to USSD step for mobile money, directly confirm for card
+      if (paymentMethod === 'card_payment') {
+        // For card, skip USSD and go directly to confirmation
+        await handleConfirmPayment(true);
+      } else {
+        setStep('ussd');
+      }
+
+    } catch (err: any) {
+      setError(err.message || 'Failed to initiate payment. Please try again.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Step 2: Confirm payment (after USSD or Pay Anyway)
+  const handleConfirmPayment = async (payAnyway: boolean = false) => {
+    if (!paymentId) {
+      setError('Payment ID is missing');
+      return;
+    }
+
+    setProcessing(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/payments/confirm`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          paymentId,
+          ussdWorked: !payAnyway
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || data.error || 'Failed to confirm payment');
+      }
+
+      // Step 3: Book ticket
+      await handleBookTicket();
+
+    } catch (err: any) {
+      setError(err.message || 'Failed to confirm payment. Please try again.');
+      setProcessing(false);
+    }
+  };
+
+  // Step 3: Book ticket after payment confirmation
+  const handleBookTicket = async () => {
+    if (!paymentId) {
+      setError('Payment ID is missing');
+      setProcessing(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/payments/book`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          paymentId,
+          numTickets
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || data.error || 'Failed to book ticket');
+      }
+
+      // Success!
+      setStep('success');
+      setProcessing(false);
+
+      // Call success callback after showing success message
+      setTimeout(() => {
+        onSuccess();
+        handleClose();
+      }, 3000);
+
+    } catch (err: any) {
+      setError(err.message || 'Failed to book ticket. Please try again.');
+      setProcessing(false);
+    }
   };
 
   const handleClose = () => {
     setStep('method');
-    setPaymentMethod('mtn');
+    setPaymentMethod('mobile_money');
     setPhoneNumber('');
     setCardNumber('');
     setExpiryDate('');
     setCvv('');
     setCardName('');
-    setTransactionId('');
+    setPaymentId(null);
+    setTransactionRef(null);
+    setUssdCode('');
+    setError(null);
     onClose();
+  };
+
+  const getPaymentMethodName = (method: PaymentMethod) => {
+    const names = {
+      'mobile_money': 'MTN Mobile Money',
+      'airtel_money': 'Airtel Money',
+      'card_payment': 'Card Payment'
+    };
+    return names[method];
   };
 
   return (
@@ -97,9 +248,9 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
               <p className="text-4xl font-bold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
                 RWF {amount.toLocaleString()}
               </p>
-              {busDetails?.numTickets && (
+              {numTickets > 0 && (
                 <p className="text-sm opacity-90 mt-2">
-                  {busDetails.numTickets} ticket{busDetails.numTickets > 1 ? 's' : ''}
+                  {numTickets} ticket{numTickets > 1 ? 's' : ''}
                 </p>
               )}
             </div>
@@ -107,7 +258,7 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
             <div className="space-y-3">
               <Card 
                 className="cursor-pointer hover:border-[#0077B6] hover:shadow-md transition-all"
-                onClick={() => handleMethodSelect('mtn')}
+                onClick={() => handleMethodSelect('mobile_money')}
               >
                 <CardContent className="p-4">
                   <div className="flex items-center gap-4">
@@ -127,7 +278,7 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
 
               <Card 
                 className="cursor-pointer hover:border-[#0077B6] hover:shadow-md transition-all"
-                onClick={() => handleMethodSelect('airtel')}
+                onClick={() => handleMethodSelect('airtel_money')}
               >
                 <CardContent className="p-4">
                   <div className="flex items-center gap-4">
@@ -146,7 +297,7 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
 
               <Card 
                 className="cursor-pointer hover:border-[#0077B6] hover:shadow-md transition-all"
-                onClick={() => handleMethodSelect('card')}
+                onClick={() => handleMethodSelect('card_payment')}
               >
                 <CardContent className="p-4">
                   <div className="flex items-center gap-4">
@@ -166,23 +317,29 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
           </>
         )}
 
-        {step === 'details' && paymentMethod !== 'card' && (
+        {step === 'details' && paymentMethod !== 'card_payment' && (
           <>
             <DialogHeader>
               <DialogTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                {paymentMethod === 'mtn' ? 'MTN Mobile Money' : 'Airtel Money'}
+                {paymentMethod === 'mobile_money' ? 'MTN Mobile Money' : 'Airtel Money'}
               </DialogTitle>
               <DialogDescription>
                 Enter your phone number to complete payment
               </DialogDescription>
             </DialogHeader>
 
+            {error && (
+              <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md px-3 py-2 text-sm text-red-600">
+                {error}
+              </div>
+            )}
+
             <div className="bg-[#F5F7FA] dark:bg-[#2B2D42] p-4 rounded-lg mb-4">
               <div className="flex items-center gap-3 mb-3">
                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                  paymentMethod === 'mtn' ? 'bg-yellow-400 text-black' : 'bg-red-600 text-white'
+                  paymentMethod === 'mobile_money' ? 'bg-yellow-400 text-black' : 'bg-red-600 text-white'
                 }`}>
-                  {paymentMethod === 'mtn' ? <Phone className="w-5 h-5" /> : <Smartphone className="w-5 h-5" />}
+                  {paymentMethod === 'mobile_money' ? <Phone className="w-5 h-5" /> : <Smartphone className="w-5 h-5" />}
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Amount to Pay</p>
@@ -191,15 +348,9 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
                   </p>
                 </div>
               </div>
-              
-              <div className="text-xs text-muted-foreground bg-white dark:bg-[#1a1a1a] p-3 rounded">
-                <p className="mb-1">💡 <strong>Payment goes to:</strong></p>
-                <p className="font-mono">SafariTix Account: 0788 XXX XXX</p>
-                <p className="text-xs opacity-75 mt-1">(Placeholder account for demo)</p>
-              </div>
             </div>
 
-            <form onSubmit={handlePayment} className="space-y-4">
+            <form onSubmit={handleInitiatePayment} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="phone">Phone Number</Label>
                 <Input
@@ -222,7 +373,9 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
                   variant="outline"
                   onClick={() => setStep('method')}
                   className="flex-1"
+                  disabled={processing}
                 >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
                   Back
                 </Button>
                 <Button
@@ -230,14 +383,21 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
                   className="flex-1 bg-[#0077B6] hover:bg-[#005a8c]"
                   disabled={processing}
                 >
-                  {processing ? 'Processing...' : `Pay RWF ${amount.toLocaleString()}`}
+                  {processing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    `Pay RWF ${amount.toLocaleString()}`
+                  )}
                 </Button>
               </div>
             </form>
           </>
         )}
 
-        {step === 'details' && paymentMethod === 'card' && (
+        {step === 'details' && paymentMethod === 'card_payment' && (
           <>
             <DialogHeader>
               <DialogTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>
@@ -247,7 +407,13 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
                 Enter your card details to complete payment
               </DialogDescription>
             </DialogHeader>
-            
+
+            {error && (
+              <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md px-3 py-2 text-sm text-red-600">
+                {error}
+              </div>
+            )}
+
             <div className="bg-gradient-to-r from-[#0077B6] to-[#005a8c] text-white p-4 rounded-lg mb-4">
               <p className="text-sm opacity-90">Amount to Pay</p>
               <p className="text-3xl font-bold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
@@ -255,7 +421,7 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
               </p>
             </div>
 
-            <form onSubmit={handlePayment} className="space-y-4">
+            <form onSubmit={handleInitiatePayment} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="cardName">Cardholder Name</Label>
                 <Input
@@ -311,7 +477,9 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
                   variant="outline"
                   onClick={() => setStep('method')}
                   className="flex-1"
+                  disabled={processing}
                 >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
                   Back
                 </Button>
                 <Button
@@ -319,11 +487,100 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
                   className="flex-1 bg-[#0077B6] hover:bg-[#005a8c]"
                   disabled={processing}
                 >
-                  <CreditCard className="w-4 h-4 mr-2" />
-                  {processing ? 'Processing...' : `Pay RWF ${amount.toLocaleString()}`}
+                  {processing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-4 h-4 mr-2" />
+                      Pay RWF {amount.toLocaleString()}
+                    </>
+                  )}
                 </Button>
               </div>
             </form>
+          </>
+        )}
+
+        {step === 'ussd' && (
+          <>
+            <DialogHeader>
+              <DialogTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                Complete Payment via USSD
+              </DialogTitle>
+              <DialogDescription>
+                Follow the instructions below to complete your payment
+              </DialogDescription>
+            </DialogHeader>
+
+            {error && (
+              <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md px-3 py-2 text-sm text-red-600 mb-4">
+                {error}
+              </div>
+            )}
+
+            <div className="bg-gradient-to-r from-[#0077B6] to-[#005a8c] text-white p-6 rounded-lg mb-4">
+              <p className="text-sm opacity-90 mb-2">Amount to Pay</p>
+              <p className="text-3xl font-bold mb-4" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                RWF {amount.toLocaleString()}
+              </p>
+              
+              <div className="bg-white/10 backdrop-blur-sm p-4 rounded-lg">
+                <p className="text-sm font-semibold mb-2">📱 USSD Instructions:</p>
+                <div className="bg-white/20 p-3 rounded font-mono text-lg text-center mb-2">
+                  Dial {ussdCode}
+                </div>
+                <p className="text-xs opacity-90">
+                  Enter your PIN when prompted to confirm payment of RWF {amount.toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            <Card className="bg-[#F5F7FA] dark:bg-[#2B2D42] border-0 mb-4">
+              <CardContent className="p-4">
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Transaction Ref:</span>
+                    <span className="font-mono text-xs">{transactionRef}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Payment Method:</span>
+                    <span>{getPaymentMethodName(paymentMethod)}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="space-y-2">
+              <Button
+                onClick={() => handleConfirmPayment(false)}
+                className="w-full bg-[#27AE60] hover:bg-[#1e8c4d]"
+                disabled={processing}
+              >
+                {processing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4 mr-2" />
+                    Confirm Payment
+                  </>
+                )}
+              </Button>
+              
+              <Button
+                onClick={() => handleConfirmPayment(true)}
+                variant="outline"
+                className="w-full"
+                disabled={processing}
+              >
+                Pay Anyway
+              </Button>
+            </div>
           </>
         )}
 
@@ -336,7 +593,7 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
               Ticket booked successfully 🎉
             </h3>
             <p className="text-muted-foreground mb-6">
-              Your payment has been confirmed
+              Your payment has been confirmed and tickets have been booked
             </p>
 
             <Card className="bg-[#F5F7FA] dark:bg-[#2B2D42] border-0">
@@ -354,16 +611,16 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
                     <span className="font-bold text-[#27AE60]">RWF {amount.toLocaleString()}</span>
                   </div>
                   
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Transaction ID:</span>
-                    <span className="font-mono text-xs">{transactionId}</span>
-                  </div>
+                  {transactionRef && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Transaction Ref:</span>
+                      <span className="font-mono text-xs">{transactionRef}</span>
+                    </div>
+                  )}
 
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Payment Method:</span>
-                    <span className="capitalize">
-                      {paymentMethod === 'mtn' ? 'MTN MoMo' : paymentMethod === 'airtel' ? 'Airtel Money' : 'Card'}
-                    </span>
+                    <span>{getPaymentMethodName(paymentMethod)}</span>
                   </div>
 
                   {busDetails && (
@@ -400,10 +657,10 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
                         </div>
                       )}
 
-                      {busDetails.numTickets && (
+                      {numTickets > 0 && (
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Tickets:</span>
-                          <span>{busDetails.numTickets}</span>
+                          <span>{numTickets}</span>
                         </div>
                       )}
                     </>
@@ -411,8 +668,9 @@ export function PaymentModal({ open, onClose, amount, onSuccess, title, descript
                 </div>
 
                 <div className="bg-white dark:bg-[#1a1a1a] p-3 rounded text-xs text-muted-foreground mt-4">
-                  <p>✓ Payment sent to SafariTix account</p>
-                  <p>✓ Ticket confirmation sent to your account</p>
+                  <p>✓ Payment confirmed</p>
+                  <p>✓ Tickets booked successfully</p>
+                  <p>✓ Redirecting to My Tickets...</p>
                 </div>
               </CardContent>
             </Card>
