@@ -95,16 +95,14 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
 
   async function fetchData() {
     try {
-      const [schedulesRes, ticketsRes, locationsRes, companiesRes, busesRes] = await Promise.all([
+      const [schedulesRes, ticketsRes, locationsRes] = await Promise.all([
         fetch(`${API_URL}/schedules`, {
           headers: { 'Authorization': `Bearer ${publicAnonKey}` }
         }).catch(() => null),
         (accessToken ? fetch(`${API_URL}/tickets`, { headers: { 'Authorization': `Bearer ${accessToken}` } }).catch(() => null) : Promise.resolve(null)),
         fetch(`${API_URL}/tracking`, {
           headers: { 'Authorization': `Bearer ${publicAnonKey}` }
-        }).catch(() => null),
-        (accessToken ? fetch(`${API_URL}/admin/companies`, { headers: { 'Authorization': `Bearer ${accessToken}` } }).catch(() => null) : Promise.resolve(null)),
-        (accessToken ? fetch(`${API_URL}/company/buses`, { headers: { 'Authorization': `Bearer ${accessToken}` } }).catch(() => null) : Promise.resolve(null))
+        }).catch(() => null)
       ]);
 
       if (schedulesRes && schedulesRes.ok) {
@@ -120,16 +118,6 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
       if (locationsRes && locationsRes.ok) {
         const data = await locationsRes.json();
         setLocations(data.locations);
-      }
-
-      if (companiesRes && companiesRes.ok) {
-        const data = await companiesRes.json();
-        setCompanies(data.companies || []);
-      }
-
-      if (busesRes && busesRes.ok) {
-        const data = await busesRes.json();
-        setBuses(data.buses || []);
       }
 
       // Mock drivers data
@@ -353,7 +341,20 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                 {searchLoading && (searchFrom || searchTo) && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <div className="animate-spin h-4 w-4 border-2 border-[#0077B6] border-t-transparent rounded-full"></div>
-                    Searching...
+                    Searching for available schedules...
+                  </div>
+                )}
+
+                {!searchFrom && !searchTo && (
+                  <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-6 rounded-lg text-center space-y-2">
+                    <Bus className="w-12 h-12 mx-auto text-[#0077B6]" />
+                    <h4 className="font-semibold text-[#0077B6]" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                      Find Your Bus Journey
+                    </h4>
+                    <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                      Enter your departure city and destination above to search for available bus schedules with seats.
+                      Results will appear automatically as you type.
+                    </p>
                   </div>
                 )}
 
@@ -363,10 +364,20 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                       Available Schedules ({filteredSchedules.length})
                     </h3>
                     
-                    {filteredSchedules.length === 0 ? (
-                      <p className="text-center text-muted-foreground py-8">No schedules found</p>
+                    {filteredSchedules.length === 0 && !searchLoading ? (
+                      <div className="text-center py-8 space-y-2">
+                        <p className="text-muted-foreground">No schedules found with available seats</p>
+                        {searchFrom && searchTo && (
+                          <p className="text-sm text-muted-foreground">
+                            Try searching for different dates or routes
+                          </p>
+                        )}
+                      </div>
                     ) : (
                       filteredSchedules.map((schedule) => {
+                        const isLowSeats = schedule.seatsAvailable <= 5 && schedule.seatsAvailable > 0;
+                        const seatPercentage = schedule.seatsAvailable / (schedule.seatsAvailable + schedule.bookedSeats) * 100;
+                        
                         return (
                           <Card key={schedule.id} className="hover:shadow-lg transition-shadow border-l-4 border-l-[#0077B6]">
                             <CardContent className="p-6">
@@ -377,8 +388,8 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                                       <p className="text-sm text-muted-foreground">Transport Company</p>
                                       <p className="font-semibold text-lg">{schedule.companyName}</p>
                                     </div>
-                                    <Badge className="bg-[#0077B6] text-white">
-                                      {schedule.seatsAvailable} seats left
+                                    <Badge className={isLowSeats ? "bg-orange-500 text-white" : "bg-[#0077B6] text-white"}>
+                                      {isLowSeats && "⚠️ "}{schedule.seatsAvailable} seat{schedule.seatsAvailable !== 1 ? 's' : ''} left
                                     </Badge>
                                   </div>
 
@@ -398,13 +409,23 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                                     </div>
                                     <div>
                                       <p className="text-sm text-muted-foreground">Available Seats</p>
-                                      <p className="font-semibold">
-                                        {schedule.seatsAvailable} seats
+                                      <p className={`font-semibold ${isLowSeats ? 'text-orange-600' : 'text-green-600'}`}>
+                                        {schedule.seatsAvailable} / {schedule.seatsAvailable + schedule.bookedSeats} seats
                                       </p>
+                                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mt-1">
+                                        <div 
+                                          className={`h-2 rounded-full transition-all ${
+                                            seatPercentage > 50 ? 'bg-green-500' : 
+                                            seatPercentage > 20 ? 'bg-orange-500' : 
+                                            'bg-red-500'
+                                          }`}
+                                          style={{ width: `${seatPercentage}%` }}
+                                        ></div>
+                                      </div>
                                     </div>
                                     <div>
                                       <p className="text-sm text-muted-foreground">Booked Seats</p>
-                                      <p className="font-semibold">
+                                      <p className="font-semibold text-muted-foreground">
                                         {schedule.bookedSeats} seats
                                       </p>
                                     </div>

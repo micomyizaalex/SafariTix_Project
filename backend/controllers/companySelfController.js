@@ -147,18 +147,34 @@ const getSchedules = async (req, res) => {
     const companyId = user?.company_id;
     if (!companyId) return res.json({ schedules: [] });
 
-    const schedules = await Schedule.findAll({ where: { company_id: companyId } });
-    const mapped = schedules.map(s => ({
-      id: s.id,
-      routeFrom: s.route_from || s.from || 'N/A',
-      routeTo: s.route_to || s.to || 'N/A',
-      departureTime: s.departure_time || s.time || null,
-      arrivalTime: s.arrival_time || null,
-      date: s.date || s.schedule_date || null,
-      price: parseFloat(s.price || 0),
-      seatsAvailable: s.seats_available || 0,
-      totalSeats: s.total_seats || 0
-    }));
+    const schedules = await Schedule.findAll({
+      where: { company_id: companyId },
+      include: [
+        {
+          model: Route,
+          attributes: ['origin', 'destination'],
+          required: false
+        }
+      ]
+    });
+
+    const mapped = schedules.map(s => {
+      const price = parseFloat(s.price_per_seat || s.price || 0);
+      const bookedSeats = s.booked_seats || 0;
+      const availableSeats = s.available_seats ?? s.seats_available ?? 0;
+      return {
+        id: s.id,
+        routeFrom: s.Route?.origin || s.route_from || s.from || 'N/A',
+        routeTo: s.Route?.destination || s.route_to || s.to || 'N/A',
+        departureTime: s.departure_time || s.time || null,
+        arrivalTime: s.arrival_time || null,
+        date: s.schedule_date || s.date || null,
+        price,
+        seatsAvailable: availableSeats,
+        bookedSeats,
+        revenue: bookedSeats * price
+      };
+    });
     res.json({ schedules: mapped });
   } catch (error) {
     res.status(400).json({ error: error.message });

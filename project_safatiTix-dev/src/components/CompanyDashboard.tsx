@@ -425,12 +425,15 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
 
   // Calculate revenue by schedule
   const scheduleRevenue = schedules.map(schedule => {
-    // Use bookedSeats from backend or fall back to counting paid tickets
-    const bookedSeatsFromBackend = schedule.bookedSeats || 0;
     const scheduleTickets = tickets.filter(t => t.scheduleId === schedule.id && t.paymentStatus === 'paid');
-    const revenue = scheduleTickets.reduce((sum, t) => sum + (t.price || 0), 0);
-    const soldSeats = bookedSeatsFromBackend > 0 ? bookedSeatsFromBackend : scheduleTickets.length;
-    return { ...schedule, revenue, soldSeats };
+    const bookedSeatsFromBackend = Number.isFinite(schedule.bookedSeats) ? schedule.bookedSeats : scheduleTickets.length;
+    const seatsAvailable = Number.isFinite(schedule.seatsAvailable) ? schedule.seatsAvailable : Math.max(0, (schedule.totalSeats || 0) - bookedSeatsFromBackend);
+    const price = schedule.price || 0;
+    const revenueFromBackend = Number.isFinite(schedule.revenue) ? schedule.revenue : bookedSeatsFromBackend * price;
+    const revenueFromTickets = scheduleTickets.reduce((sum, t) => sum + (t.price || 0), 0);
+    const revenue = revenueFromBackend || revenueFromTickets;
+
+    return { ...schedule, revenue, soldSeats: bookedSeatsFromBackend, seatsAvailable };
   });
 
   // Sort tickets by creation date (newest first) and limit to last 5 if not showing all

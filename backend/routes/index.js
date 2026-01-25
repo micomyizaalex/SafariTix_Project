@@ -7,6 +7,7 @@ const adminRoutes = require('./admin');
 const companySelfRoutes = require('./company');
 const notificationRoutes = require('./notifications');
 const publicController = require('../controllers/publicController');
+const auth = require('../middleware/authenticate');
 
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
@@ -18,5 +19,9 @@ router.use('/notifications', notificationRoutes);
 // Public endpoints (no authentication required)
 router.get('/schedules', publicController.getAvailableSchedules);
 router.get('/schedules/search', publicController.searchSchedules);
+router.get('/tracking', publicController.getLocations);
+
+// User endpoints (authentication required)
+router.get('/tickets', auth, publicController.getTickets);
 
 module.exports = router;
