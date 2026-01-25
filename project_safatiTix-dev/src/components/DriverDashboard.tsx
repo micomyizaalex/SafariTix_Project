@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { BrowserMultiFormatReader } from '@zxing/browser';
 import { useAuth } from './AuthContext';
 import { API_URL } from '../utils/supabase-client';
 import { ThemeToggle } from './ThemeToggle';
@@ -21,6 +22,9 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
   const [scanResult, setScanResult] = useState<any>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanMode, setScanMode] = useState<'manual' | 'camera'>('manual');
+  const [contextLoading, setContextLoading] = useState(false);
+  const [contextError, setContextError] = useState<string | null>(null);
+  const [assignedBuses, setAssignedBuses] = useState<Array<{ id: string; plateNumber: string; routeFrom?: string | null; routeTo?: string | null; scheduleId?: string | null }>>([]);
   
   // GPS tracking
   const [selectedBusId, setSelectedBusId] = useState('');
@@ -35,11 +39,58 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
+  const lastScannedRef = useRef<string | null>(null);
 
-  // Mock bus assignment
-  const [assignedBuses] = useState([
-    { id: crypto.randomUUID(), plateNumber: 'RAC 123 A', route: 'Kigali - Musanze' },
-  ]);
+  useEffect(() => {
+    codeReaderRef.current = new BrowserMultiFormatReader();
+    return () => {
+      codeReaderRef.current?.reset();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!accessToken) return;
+
+    let isCancelled = false;
+    setContextLoading(true);
+    setContextError(null);
+
+    fetch(`${API_URL}/driver/context`, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      }
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (isCancelled) return;
+        if (!res.ok) {
+          setAssignedBuses([]);
+          setContextError(data?.message || data?.error || 'Unable to load your assignments');
+          return;
+        }
+
+        const buses = data?.buses || [];
+        setAssignedBuses(buses);
+        if (buses.length > 0) {
+          setSelectedBusId(buses[0].id);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setContextError('Failed to load your assignments');
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setContextLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [accessToken]);
 
   useEffect(() => {
     let watchId: number | null = null;
@@ -119,12 +170,17 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
     }
   }
 
-  async function handleScanTicket(e?: React.FormEvent) {
+  async function handleScanTicket(e?: React.FormEvent, codeOverride?: string) {
     if (e) e.preventDefault();
-    if (!qrInput.trim()) return;
+    const payload = (codeOverride ?? qrInput).trim();
+    if (!payload) return;
+
+    if (isScanning) return;
 
     setIsScanning(true);
     setScanResult(null);
+    setQrInput(payload);
+    lastScannedRef.current = payload;
 
     try {
       const res = await fetch(`${API_URL}/driver/scan`, {
@@ -133,18 +189,24 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ qrCode: qrInput.trim() })
+        body: JSON.stringify({ qrCode: payload })
       });
 
+      const data = await res.json().catch(() => ({}));
+
       if (res.ok) {
-        const data = await res.json();
         setScanResult(data);
-        if (cameraActive) {
+        if (data?.valid && cameraActive) {
           stopCamera();
         }
+      } else {
+        setScanResult({
+          valid: false,
+          message: data?.message || data?.error || 'Ticket already used or invalid',
+          ticket: data?.ticket
+        });
       }
     } catch (error) {
-      // Ticket scan errors are handled with user-friendly message
       setScanResult({
         valid: false,
         message: 'Error scanning ticket'
@@ -156,6 +218,7 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
 
   async function startCamera() {
     setCameraError(null);
+    lastScannedRef.current = null;
     
     // Check if camera API is available
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -172,6 +235,10 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
         videoRef.current.srcObject = stream;
         setCameraActive(true);
         setCameraError(null);
+        // Kick off decoding once the video is ready
+        setTimeout(() => {
+          startDecoding();
+        }, 300);
       }
     } catch (error: any) {
       // Camera errors are expected in iframe/embedded environments - handle gracefully
@@ -194,12 +261,28 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
   }
 
   function stopCamera() {
+    codeReaderRef.current?.reset();
+    lastScannedRef.current = null;
     if (videoRef.current && videoRef.current.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
       setCameraActive(false);
     }
+  }
+
+  function startDecoding() {
+    if (!codeReaderRef.current || !videoRef.current) return;
+
+    codeReaderRef.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
+      if (result) {
+        const text = result.getText();
+        if (text && text !== lastScannedRef.current) {
+          lastScannedRef.current = text;
+          handleScanTicket(undefined, text);
+        }
+      }
+    });
   }
 
   useEffect(() => {
@@ -227,6 +310,11 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
   }
 
   function handleManualLocationSet() {
+    if (!selectedBusId) {
+      alert('Please select a bus before sharing location');
+      return;
+    }
+
     const lat = parseFloat(manualLat);
     const lng = parseFloat(manualLng);
     
@@ -244,6 +332,16 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
     updateLocation(lat, lng);
     setGpsError(null);
   }
+
+  const derivedStatus = scanResult
+    ? (scanResult.valid ? 'VALID' : scanResult?.ticket?.status === 'checked_in' ? 'USED' : 'INVALID')
+    : null;
+
+  const statusClass = derivedStatus === 'VALID'
+    ? 'bg-green-100 text-green-700 border-green-300'
+    : derivedStatus === 'USED'
+      ? 'bg-orange-100 text-orange-700 border-orange-300'
+      : 'bg-red-100 text-red-700 border-red-300';
 
   return (
     <div className="min-h-screen bg-background">
@@ -273,6 +371,14 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
       </div>
 
       <div className="container mx-auto px-4 py-8 max-w-4xl">
+        {contextError && (
+          <Alert className="mb-4 border-orange-300 bg-orange-50 dark:bg-orange-950">
+            <AlertCircle className="h-5 w-5 text-[#F4A261]" />
+            <AlertDescription>
+              <p className="text-sm">{contextError}</p>
+            </AlertDescription>
+          </Alert>
+        )}
         <Tabs defaultValue="scanner" className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="scanner">Ticket Verification</TabsTrigger>
@@ -394,7 +500,12 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
                         <CheckCircle className="h-5 w-5 text-[#27AE60]" />
                         <AlertDescription>
                           <div className="space-y-3">
-                            <p className="font-bold text-[#27AE60] text-lg">✅ Ticket Verified</p>
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <p className="font-bold text-[#27AE60] text-lg">✅ Ticket Verified</p>
+                              {derivedStatus && (
+                                <Badge className={`${statusClass} text-xs px-2 py-1`}>{derivedStatus}</Badge>
+                              )}
+                            </div>
                             <div className="bg-white dark:bg-[#2B2D42] p-4 rounded-lg space-y-2 text-sm">
                               <div className="flex justify-between">
                                 <span className="text-muted-foreground">Passenger:</span>
@@ -427,7 +538,12 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
                         <XCircle className="h-5 w-5 text-[#E63946]" />
                         <AlertDescription>
                           <div className="space-y-2">
-                            <p className="font-bold text-[#E63946] text-lg">❌ {scanResult.message}</p>
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <p className="font-bold text-[#E63946] text-lg">❌ {scanResult.message}</p>
+                              {derivedStatus && (
+                                <Badge className={`${statusClass} text-xs px-2 py-1`}>{derivedStatus}</Badge>
+                              )}
+                            </div>
                             {scanResult.ticket && (
                               <p className="text-sm">
                                 This ticket has already been used or is invalid.
@@ -443,6 +559,7 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
                       onClick={() => {
                         setScanResult(null);
                         setQrInput('');
+                        lastScannedRef.current = null;
                       }}
                     >
                       Scan Another Ticket
@@ -488,15 +605,19 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
                       className="w-full p-2 border rounded-md bg-background"
                       value={selectedBusId}
                       onChange={(e) => setSelectedBusId(e.target.value)}
-                      disabled={isTracking}
+                      disabled={isTracking || contextLoading || assignedBuses.length === 0}
                     >
-                      <option value="">Choose a bus</option>
+                      <option value="">{contextLoading ? 'Loading buses...' : 'Choose a bus'}</option>
                       {assignedBuses.map((bus) => (
                         <option key={bus.id} value={bus.id}>
-                          {bus.plateNumber} - {bus.route}
+                          {bus.plateNumber}
+                          {bus.routeFrom && bus.routeTo ? ` - ${bus.routeFrom} -> ${bus.routeTo}` : ''}
                         </option>
                       ))}
                     </select>
+                    {assignedBuses.length === 0 && !contextLoading && (
+                      <p className="text-xs text-muted-foreground">No buses assigned to your profile.</p>
+                    )}
                   </div>
 
                   <div className="flex gap-2">
@@ -561,7 +682,7 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
                     <Button 
                       className="w-full bg-[#27AE60] hover:bg-[#1e8c4d]" 
                       onClick={startTracking}
-                      disabled={useManualLocation && !currentLocation}
+                      disabled={!selectedBusId || (useManualLocation && !currentLocation) || contextLoading}
                     >
                       <MapPin className="w-4 h-4 mr-2" />
                       {useManualLocation ? 'Start Sharing Location' : 'Start GPS Tracking'}

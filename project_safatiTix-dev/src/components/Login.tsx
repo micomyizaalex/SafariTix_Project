@@ -58,16 +58,9 @@ export function Login() {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
 
-      const role = data.user?.role;
-      const rolePath: Record<string, string> = {
-        admin: '/dashboard/admin',
-        company_admin: '/dashboard/company',
-        commuter: '/dashboard/commuter',
-        driver: '/dashboard/driver'
-      };
-
+      const redirect = data?.homePath || data?.user?.homePath;
       // Do a full page navigation so AuthProvider re-initializes from localStorage
-      window.location.href = rolePath[role] || '/';
+      window.location.href = redirect || '/';
 
     } catch (err: any) {
       setError(err.message || 'Login failed');

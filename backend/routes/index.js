@@ -7,6 +7,7 @@ const adminRoutes = require('./admin');
 const companySelfRoutes = require('./company');
 const notificationRoutes = require('./notifications');
 const paymentRoutes = require('./payments');
+const driverRoutes = require('./driver');
 const publicController = require('../controllers/publicController');
 const auth = require('../middleware/authenticate');
 
@@ -17,6 +18,7 @@ router.use('/admin', adminRoutes);
 router.use('/company', companySelfRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/payments', paymentRoutes);
+router.use('/driver', driverRoutes);
 
 // Public endpoints (no authentication required)
 router.get('/schedules', publicController.getAvailableSchedules);

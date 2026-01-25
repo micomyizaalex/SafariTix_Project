@@ -1,6 +1,22 @@
 const { User, Company } = require('../models');
 const { generateAccessToken, generateRefreshToken, verifyToken } = require('../config/jwt');
 
+// Helper to compute a default home path for a given role
+function roleHomePath(role) {
+  switch (role) {
+    case 'driver':
+      return '/driver/dashboard';
+    case 'company_admin':
+      return '/company/dashboard';
+    case 'commuter':
+      return '/';
+    case 'admin':
+      return '/dashboard/admin';
+    default:
+      return '/';
+  }
+}
+
 const register = async (req, res) => {
   try {
     const { full_name, email, password, role, company_name, phone_number } = req.body;
@@ -52,9 +68,11 @@ const register = async (req, res) => {
 
     const token = generateAccessToken(user.id, user.role);
 
+    const safeUser = user.toSafeObject();
     res.status(201).json({
-      user: user.toSafeObject(),
-      token
+      user: { ...safeUser, homePath: roleHomePath(safeUser.role) },
+      token,
+      homePath: roleHomePath(safeUser.role)
     });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -81,9 +99,12 @@ const login = async (req, res) => {
 
     const token = generateAccessToken(user.id, user.role);
 
+    const safeUser = user.toSafeObject();
+
     res.json({
-      user: user.toSafeObject(),
-      token
+      user: { ...safeUser, homePath: roleHomePath(safeUser.role) },
+      token,
+      homePath: roleHomePath(safeUser.role)
     });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -93,7 +114,8 @@ const login = async (req, res) => {
 const getMe = async (req, res) => {
   try {
     const user = await User.findByPk(req.userId);
-    res.json({ ...user.toSafeObject() });
+    const safeUser = user.toSafeObject();
+    res.json({ user: { ...safeUser, homePath: roleHomePath(safeUser.role) }, homePath: roleHomePath(safeUser.role) });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }

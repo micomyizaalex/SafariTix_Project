@@ -8,6 +8,14 @@ const isAdmin = (req, res, next) => {
   next();
 };
 
+// Role-based guard to keep protected routes tight
+const requireRoles = (roles = []) => (req, res, next) => {
+  if (!req.userRole || !roles.includes(req.userRole)) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Insufficient role to access this resource' });
+  }
+  next();
+};
+
 // Check if user owns resource (post)
 const isPostOwner = async (req, res, next) => {
   try {
@@ -58,5 +66,6 @@ module.exports = {
   isAdmin,
   isPostOwner,
   isCommentOwner,
-  isProfileOwner
+  isProfileOwner,
+  requireRoles
 };

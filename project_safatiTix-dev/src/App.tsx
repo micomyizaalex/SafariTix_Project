@@ -5,6 +5,7 @@ import {BrowserRouter, Outlet, Routes, Route} from 'react-router-dom'
 import HomePage from "./pages/HomePage"
 import  {LandingPage}  from './components/LandingPage'
 import Layout from './pages/Layout'
+import { RequireRole, RedirectByRole } from './components/RouteGuards'
 import NotFound from './pages/NotFound'
 import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
@@ -25,7 +26,7 @@ const App = () => {
              <Routes>
               {/* routes for users  */}
                 <Route path='/' element={<Layout/>}>
-                    <Route index element={<HomePage/>}/>
+                  <Route index element={<RedirectByRole><HomePage/></RedirectByRole>}/>
                     <Route path='login' element={<LoginPage/>}/>
                     <Route path='signup' element={<SignupPage/>}/>
                     <Route path='*' element={<NotFound/>}/>
@@ -35,11 +36,19 @@ const App = () => {
 
 
                 <Route path='/dashboard' element={<Layout/>}>
-                  <Route path='admin' element={<AdminDashboard/>}/>
-                  <Route path='company' element={<CompanyDashboard/>}/>
-                  <Route path='commuter' element={<CommuterDashboard/>}/>
-                  <Route path='driver' element={<DriverDashboard/>}/>
+                  <Route path='admin' element={<RequireRole allowed={["admin"]}><AdminDashboard/></RequireRole>}/>
+                  <Route path='company' element={<RequireRole allowed={["company_admin"]}><CompanyDashboard/></RequireRole>}/>
+                  <Route path='commuter' element={<RequireRole allowed={["commuter"]}><CommuterDashboard/></RequireRole>}/>
+                  <Route path='driver' element={<RequireRole allowed={["driver"]}><DriverDashboard/></RequireRole>}/>
                   <Route path='*' element={<NotFound/>}/>
+                </Route>
+
+                {/* Alias routes per requirement */}
+                <Route path='/driver/dashboard' element={<Layout/>}>
+                  <Route index element={<RequireRole allowed={["driver"]}><DriverDashboard/></RequireRole>} />
+                </Route>
+                <Route path='/company/dashboard' element={<Layout/>}>
+                  <Route index element={<RequireRole allowed={["company_admin"]}><CompanyDashboard/></RequireRole>} />
                 </Route>
 
 
