@@ -13,6 +13,7 @@ function getHomePath(user: { role?: string; homePath?: string } | null): string 
     case 'admin':
       return '/dashboard/admin';
     case 'commuter':
+      return '/commuter/dashboard';
     default:
       return '/';
   }

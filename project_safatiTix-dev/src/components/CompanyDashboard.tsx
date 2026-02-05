@@ -32,7 +32,18 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
   const [showAddBus, setShowAddBus] = useState(false);
   const [showAddSchedule, setShowAddSchedule] = useState(false);
   const [showAddDriver, setShowAddDriver] = useState(false);
+  const [showEditDriver, setShowEditDriver] = useState(false);
+  const [editingDriverId, setEditingDriverId] = useState('');
+  const [editDriverName, setEditDriverName] = useState('');
+  const [editDriverLicense, setEditDriverLicense] = useState('');
+  const [editDriverPhone, setEditDriverPhone] = useState('');
   const [showAssignDriver, setShowAssignDriver] = useState(false);
+  const [showEditBus, setShowEditBus] = useState(false);
+  const [editingBusId, setEditingBusId] = useState('');
+  const [editPlateNumber, setEditPlateNumber] = useState('');
+  const [editCapacity, setEditCapacity] = useState('');
+  const [editSeatLayout, setEditSeatLayout] = useState('30');
+  const [editModel, setEditModel] = useState('');
   const [showSubscriptionPayment, setShowSubscriptionPayment] = useState(false);
   const [subscriptionPaid, setSubscriptionPaid] = useState(false);
   const [showAllTickets, setShowAllTickets] = useState(false);
@@ -45,8 +56,11 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
   // Add bus form
   const [plateNumber, setPlateNumber] = useState('');
   const [capacity, setCapacity] = useState('');
+  const [seatLayout, setSeatLayout] = useState('30');
   const [model, setModel] = useState('');
   const [selectedDriver, setSelectedDriver] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all'|'active'|'inactive'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Assign driver dialog
   const [assignBusId, setAssignBusId] = useState('');
@@ -132,6 +146,7 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
           plateNumber,
           capacity: parseInt(capacity),
           model,
+          seatLayout,
           driverId: selectedDriver || null
         })
       });
@@ -144,12 +159,14 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
         setSelectedDriver('');
         await fetchData();
       } else {
-        // Backend endpoint may not be fully implemented - handle gracefully
-        alert('Unable to add bus. Please ensure the backend is properly configured.');
+        // Show backend error if available
+        const data = await res.json().catch(() => ({}));
+        const msg = data?.error || data?.message || 'Unable to add bus. Please ensure the backend is properly configured.';
+        alert(msg);
       }
     } catch (error) {
       // Network errors are expected if backend endpoint doesn't exist yet - handle gracefully
-      alert('Unable to connect to server. Please check your connection or try again later.');
+      alert(error?.message || 'Unable to connect to server. Please check your connection or try again later.');
     }
   }
 
@@ -171,10 +188,85 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
         setAssignDriverId('');
         await fetchData();
       } else {
-        alert('Unable to assign driver. Please ensure the backend is properly configured.');
+        const data = await res.json().catch(() => ({}));
+        const msg = data?.error || 'Unable to assign driver. Please ensure the backend is properly configured.';
+        alert(msg);
       }
     } catch (error) {
-      alert('Unable to connect to server. Please check your connection or try again later.');
+      alert(error?.message || 'Unable to connect to server. Please check your connection or try again later.');
+    }
+  }
+
+  async function handleEditBus(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingBusId) return;
+    try {
+      const res = await fetch(`${API_URL}/company/buses/${editingBusId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          plateNumber: editPlateNumber,
+          capacity: parseInt(editCapacity),
+          model: editModel,
+          seatLayout: editSeatLayout
+        })
+      });
+
+      if (res.ok) {
+        setShowEditBus(false);
+        setEditingBusId('');
+        await fetchData();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Unable to update bus');
+      }
+    } catch (error) {
+      alert(error?.message || 'Unable to connect to server');
+    }
+  }
+
+  async function handleDeleteBus(id: string) {
+    if (!confirm('Are you sure you want to delete/deactivate this bus? This cannot be undone.')) return;
+    try {
+      const res = await fetch(`${API_URL}/company/buses/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      if (res.ok) {
+        await fetchData();
+        alert('Bus deactivated');
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Unable to delete bus');
+      }
+    } catch (error) {
+      alert('Unable to connect to server');
+    }
+  }
+
+  async function handleToggleStatus(id: string, currentStatus: string) {
+    const newStatus = currentStatus === 'active' ? 'INACTIVE' : 'ACTIVE';
+    if (!confirm(`Change status to ${newStatus}?`)) return;
+    try {
+      const res = await fetch(`${API_URL}/company/buses/${id}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ status: newStatus })
+      });
+      if (res.ok) {
+        await fetchData();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Unable to change status');
+      }
+    } catch (error) {
+      alert('Unable to connect to server');
     }
   }
 
@@ -271,6 +363,51 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
       }
     } catch (error) {
       alert('Unable to connect to server. Please check your connection or try again later.');
+    }
+  }
+
+  async function handleEditDriver(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingDriverId) return;
+    try {
+      const res = await fetch(`${API_URL}/company/drivers/${editingDriverId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name: editDriverName, license: editDriverLicense, phone: editDriverPhone })
+      });
+
+      if (res.ok) {
+        setShowEditDriver(false);
+        setEditingDriverId('');
+        await fetchData();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Unable to update driver');
+      }
+    } catch (error) {
+      alert('Unable to connect to server');
+    }
+  }
+
+  async function handleDeleteDriver(id: string) {
+    if (!confirm('Delete this driver? This cannot be undone.')) return;
+    try {
+      const res = await fetch(`${API_URL}/company/drivers/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      if (res.ok) {
+        await fetchData();
+        alert('Driver deleted');
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Unable to delete driver');
+      }
+    } catch (error) {
+      alert('Unable to connect to server');
     }
   }
 
@@ -663,14 +800,26 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="capacity">Capacity</Label>
-                          <Input
-                            id="capacity"
-                            type="number"
-                            value={capacity}
-                            onChange={(e) => setCapacity(e.target.value)}
-                            required
-                          />
+                            <Label htmlFor="seat-layout">Seat Layout</Label>
+                            <Select value={seatLayout} onValueChange={(val) => { setSeatLayout(val); setCapacity(val); }}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select layout" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="25">25 seats</SelectItem>
+                                <SelectItem value="30">30 seats</SelectItem>
+                                <SelectItem value="50">50 seats</SelectItem>
+                              </SelectContent>
+                            </Select>
+
+                            <Label htmlFor="capacity" className="mt-2">Capacity</Label>
+                            <Input
+                              id="capacity"
+                              type="number"
+                              value={capacity}
+                              onChange={(e) => setCapacity(e.target.value)}
+                              required
+                            />
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="model">Model</Label>
@@ -713,30 +862,71 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
                 </div>
               </CardHeader>
               <CardContent>
+                <div className="flex items-center gap-4 mb-4">
+                  <Input placeholder="Search plate number" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                  <Select value={statusFilter} onValueChange={(val) => setStatusFilter(val as any)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Plate Number</TableHead>
                       <TableHead>Model</TableHead>
                       <TableHead>Capacity</TableHead>
+                      <TableHead>Seat Layout</TableHead>
                       <TableHead>Driver</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {buses.map((bus) => {
+                    {buses
+                      .filter(b => {
+                        if (statusFilter !== 'all' && b.status !== statusFilter) return false;
+                        if (searchTerm && !b.plateNumber.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+                        return true;
+                      })
+                      .map((bus) => {
                       const driver = drivers.find(d => d.id === bus.driverId);
                       return (
                         <TableRow key={bus.id}>
                           <TableCell>{bus.plateNumber}</TableCell>
                           <TableCell>{bus.model}</TableCell>
                           <TableCell>{bus.capacity} seats</TableCell>
+                          <TableCell>{bus.seatLayout}</TableCell>
                           <TableCell>{driver?.name || 'Unassigned'}</TableCell>
                           <TableCell>
-                            <Badge className="bg-[#27AE60]">{bus.status}</Badge>
+                            <Badge className={bus.status === 'active' ? 'bg-[#27AE60]' : 'bg-[#94A3B8]'}>
+                              {bus.status}
+                            </Badge>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="flex items-center gap-2">
+                            <Button size="sm" variant="outline" onClick={() => {
+                              setEditingBusId(bus.id);
+                              setEditPlateNumber(bus.plateNumber);
+                              setEditCapacity(String(bus.capacity));
+                              setEditSeatLayout(bus.seatLayout);
+                              setEditModel(bus.model || '');
+                              setShowEditBus(true);
+                            }}>Edit</Button>
+
+                            <Button size="sm" variant="outline" onClick={() => handleToggleStatus(bus.id, bus.status)}>
+                              {bus.status === 'active' ? 'Deactivate' : 'Activate'}
+                            </Button>
+
+                            <Button size="sm" variant="destructive" onClick={() => handleDeleteBus(bus.id)}>
+                              Delete
+                            </Button>
+
                             <Button
                               variant="outline"
                               size="sm"
@@ -826,6 +1016,7 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
                       <TableHead>Phone</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Assigned Bus</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -845,6 +1036,19 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
                           </TableCell>
                           <TableCell>
                             <span className="text-sm font-medium">{assignedBuses}</span>
+                          </TableCell>
+                          <TableCell className="flex items-center gap-2">
+                            <Button size="sm" variant="outline" onClick={() => {
+                              setEditingDriverId(driver.id);
+                              setEditDriverName(driver.name || '');
+                              setEditDriverLicense(driver.license || '');
+                              setEditDriverPhone(driver.phone || '');
+                              setShowEditDriver(true);
+                            }}>Edit</Button>
+
+                            <Button size="sm" variant="destructive" onClick={() => handleDeleteDriver(driver.id)}>
+                              Delete
+                            </Button>
                           </TableCell>
                         </TableRow>
                       );
@@ -1130,6 +1334,70 @@ export function CompanyDashboard({ onSettings }: CompanyDashboardProps) {
             <Button type="submit" className="w-full bg-[#0077B6] hover:bg-[#005a8c]">
               Save
             </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+      {/* Edit Driver Dialog */}
+      <Dialog open={showEditDriver} onOpenChange={setShowEditDriver}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Driver</DialogTitle>
+            <DialogDescription>Update driver details</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleEditDriver} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-driver-name">Full Name</Label>
+              <Input id="edit-driver-name" value={editDriverName} onChange={(e) => setEditDriverName(e.target.value)} required />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-driver-license">License Number</Label>
+              <Input id="edit-driver-license" value={editDriverLicense} onChange={(e) => setEditDriverLicense(e.target.value)} required />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-driver-phone">Phone Number</Label>
+              <Input id="edit-driver-phone" value={editDriverPhone} onChange={(e) => setEditDriverPhone(e.target.value)} required />
+            </div>
+            <Button type="submit" className="w-full bg-[#0077B6] hover:bg-[#005a8c]">Save</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Bus Dialog */}
+      <Dialog open={showEditBus} onOpenChange={setShowEditBus}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Bus</DialogTitle>
+            <DialogDescription>Update bus details and save changes</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleEditBus} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-plate">Plate Number</Label>
+              <Input id="edit-plate" value={editPlateNumber} onChange={(e) => setEditPlateNumber(e.target.value)} required />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-seat-layout">Seat Layout</Label>
+              <Select value={editSeatLayout} onValueChange={(val) => { setEditSeatLayout(val); setEditCapacity(val); }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select layout" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="25">25 seats</SelectItem>
+                  <SelectItem value="30">30 seats</SelectItem>
+                  <SelectItem value="50">50 seats</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Label htmlFor="edit-capacity" className="mt-2">Capacity</Label>
+              <Input id="edit-capacity" type="number" value={editCapacity} onChange={(e) => setEditCapacity(e.target.value)} required />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-model">Model</Label>
+              <Input id="edit-model" value={editModel} onChange={(e) => setEditModel(e.target.value)} required />
+            </div>
+
+            <Button type="submit" className="w-full bg-[#0077B6] hover:bg-[#005a8c]">Save Changes</Button>
           </form>
         </DialogContent>
       </Dialog>

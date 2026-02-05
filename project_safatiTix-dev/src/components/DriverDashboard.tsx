@@ -1,366 +1,331 @@
-import { useState, useEffect, useRef } from 'react';
-import { BrowserMultiFormatReader } from '@zxing/browser';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
 import { API_URL } from '../utils/supabase-client';
+import { QrReader } from 'react-qr-reader';
 import { ThemeToggle } from './ThemeToggle';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { Label } from './ui/label';
 import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Bus, MapPin, QrCode, LogOut, CheckCircle, XCircle, AlertCircle, Navigation, Camera, Keyboard, Settings } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
-import { Label } from './ui/label';
+import { Bus, MapPin, QrCode, LogOut, CheckCircle, XCircle, AlertCircle, Navigation, Camera, Keyboard, Settings } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 
-interface DriverDashboardProps {
-  onSettings?: () => void;
-}
+type Bus = {
+  id: number;
+  plateNumber?: string;
+  scheduleId?: number | null;
+  routeFrom?: string | null;
+  routeTo?: string | null;
+};
 
-export function DriverDashboard({ onSettings }: DriverDashboardProps) {
-  const { user, accessToken, signOut } = useAuth();
-  const [qrInput, setQrInput] = useState('');
-  const [scanResult, setScanResult] = useState<any>(null);
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanMode, setScanMode] = useState<'manual' | 'camera'>('manual');
-  const [contextLoading, setContextLoading] = useState(false);
-  const [contextError, setContextError] = useState<string | null>(null);
-  const [assignedBuses, setAssignedBuses] = useState<Array<{ id: string; plateNumber: string; routeFrom?: string | null; routeTo?: string | null; scheduleId?: string | null }>>([]);
-  
-  // GPS tracking
-  const [selectedBusId, setSelectedBusId] = useState('');
-  const [isTracking, setIsTracking] = useState(false);
-  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [gpsError, setGpsError] = useState<string | null>(null);
-  const [useManualLocation, setUseManualLocation] = useState(false);
-  const [manualLat, setManualLat] = useState('');
-  const [manualLng, setManualLng] = useState('');
-  
-  // Video scanning
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
-  const lastScannedRef = useRef<string | null>(null);
+type ScanResult = {
+  valid: boolean;
+  message?: string;
+  ticket?: any;
+};
 
+type RecentScan = {
+  id: string;
+  passengerName: string;
+  seatNumber: string;
+  timestamp: Date;
+  valid: boolean;
+};
+
+export function DriverDashboard() {
+  const { user, accessToken, loading, signOut } = useAuth();
+  const token = accessToken || localStorage.getItem('token');
+
+  const [buses, setBuses] = useState<Bus[]>([]);
+  const [selectedBusId, setSelectedBusId] = useState<number | null>(null);
+
+  const [scanning, setScanning] = useState(false);
+  const [manualCode, setManualCode] = useState('');
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusSuccess, setStatusSuccess] = useState<boolean | null>(null);
+  const [recentScans, setRecentScans] = useState<RecentScan[]>([]);
+
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const mapObjRef = useRef<any>(null);
+  const markerRef = useRef<any>(null);
+
+  const [position, setPosition] = useState<{ lat: number; lng: number } | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+  const [liveSharing, setLiveSharing] = useState(false);
+  const [scanMode, setScanMode] = useState<'camera' | 'manual'>('manual');
+
+  // Fetch driver context (buses)
   useEffect(() => {
-    codeReaderRef.current = new BrowserMultiFormatReader();
-    return () => {
-      codeReaderRef.current?.reset();
-    };
+    async function fetchContext() {
+      if (!token) return;
+      try {
+        const res = await fetch(`${API_URL}/driver/context`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const fetchedBuses: Bus[] = (data.buses || []).map((b: any) => ({
+          id: b.id,
+          plateNumber: b.plateNumber || b.plate_number || null,
+          scheduleId: b.scheduleId || b.schedule_id || null,
+          routeFrom: b.routeFrom || b.route_from || null,
+          routeTo: b.routeTo || b.route_to || null,
+        }));
+        setBuses(fetchedBuses);
+        if (fetchedBuses.length > 0) setSelectedBusId(fetchedBuses[0].id);
+      } catch {}
+    }
+    fetchContext();
+  }, [token]);
+
+  // Google Maps script loader + init
+  useEffect(() => {
+    const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+    if (!key) return;
+    if ((window as any).google && (window as any).google.maps) {
+      setMapLoaded(true);
+      return;
+    }
+    const id = 'safaritix-google-maps';
+    if (document.getElementById(id)) return;
+    const script = document.createElement('script');
+    script.id = id;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&v=weekly`;
+    script.async = true;
+    script.onload = () => setMapLoaded(true);
+    document.head.appendChild(script);
   }, []);
 
+  // initialize map once loaded and we have a container
   useEffect(() => {
-    if (!accessToken) return;
+    if (!mapLoaded || !mapRef.current) return;
+    const g = (window as any).google;
+    if (!g || !g.maps) return;
+    const center = position ? { lat: position.lat, lng: position.lng } : { lat: 0, lng: 0 };
+    mapObjRef.current = new g.maps.Map(mapRef.current, {
+      center,
+      zoom: position ? 15 : 2,
+      disableDefaultUI: true,
+    });
+    markerRef.current = new g.maps.Marker({
+      position: center,
+      map: mapObjRef.current,
+      title: 'Your location',
+    });
+  }, [mapLoaded, position]);
 
-    let isCancelled = false;
-    setContextLoading(true);
-    setContextError(null);
-
-    fetch(`${API_URL}/driver/context`, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-      }
-    })
-      .then(async (res) => {
-        const data = await res.json().catch(() => ({}));
-        if (isCancelled) return;
-        if (!res.ok) {
-          setAssignedBuses([]);
-          setContextError(data?.message || data?.error || 'Unable to load your assignments');
-          return;
-        }
-
-        const buses = data?.buses || [];
-        setAssignedBuses(buses);
-        if (buses.length > 0) {
-          setSelectedBusId(buses[0].id);
-        }
-      })
-      .catch(() => {
-        if (!isCancelled) {
-          setContextError('Failed to load your assignments');
-        }
-      })
-      .finally(() => {
-        if (!isCancelled) {
-          setContextLoading(false);
-        }
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [accessToken]);
-
+  // update marker + center when position changes
   useEffect(() => {
-    let watchId: number | null = null;
-    let intervalId: number | null = null;
-
-    if (isTracking && selectedBusId && !useManualLocation) {
-      if ('geolocation' in navigator) {
-        setGpsError(null);
-        watchId = navigator.geolocation.watchPosition(
-          (position) => {
-            const { latitude, longitude } = position.coords;
-            setCurrentLocation({ lat: latitude, lng: longitude });
-            setGpsError(null);
-            updateLocation(latitude, longitude);
-          },
-          (error) => {
-            // Geolocation errors are expected in iframe/embedded environments - handle silently
-            let errorMsg = 'GPS not available in this environment. ';
-            
-            if (error.message?.includes('permissions policy')) {
-              errorMsg = 'GPS is disabled in this environment. Please use Manual Location mode.';
-              setUseManualLocation(true);
-            } else if (error.code === 1) {
-              errorMsg = 'Location permission denied. Use Manual Location mode.';
-              setUseManualLocation(true);
-            } else if (error.code === 2) {
-              errorMsg = 'Location unavailable. Use Manual Location mode.';
-            } else if (error.code === 3) {
-              errorMsg = 'Location request timed out. Use Manual Location mode.';
-            }
-            setGpsError(errorMsg);
-          },
-          {
-            enableHighAccuracy: true,
-            maximumAge: 0,
-            timeout: 10000
-          }
-        );
-      } else {
-        setGpsError('Geolocation not supported. Use Manual Location mode.');
-        setUseManualLocation(true);
-      }
+    if (!position || !mapObjRef.current) return;
+    const g = (window as any).google;
+    const pos = { lat: position.lat, lng: position.lng };
+    mapObjRef.current.setCenter(pos);
+    mapObjRef.current.setZoom(15);
+    if (markerRef.current) {
+      markerRef.current.setPosition(pos);
+    } else {
+      markerRef.current = new g.maps.Marker({ position: pos, map: mapObjRef.current });
     }
+  }, [position]);
 
-    if (isTracking && selectedBusId && useManualLocation && currentLocation) {
-      intervalId = window.setInterval(() => {
-        updateLocation(currentLocation.lat, currentLocation.lng);
-      }, 5000);
-    }
-
-    return () => {
-      if (watchId !== null) {
-        navigator.geolocation.clearWatch(watchId);
-      }
-      if (intervalId !== null) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [isTracking, selectedBusId, useManualLocation, currentLocation]);
-
-  async function updateLocation(lat: number, lng: number) {
-    try {
-      await fetch(`${API_URL}/driver/location`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          busId: selectedBusId,
-          lat,
-          lng
-        })
-      });
-    } catch (error) {
-      // Location update errors are handled silently
-    }
+  function showStatus(message: string, success: boolean) {
+    setStatusMessage(message);
+    setStatusSuccess(success);
+    setTimeout(() => {
+      setStatusMessage(null);
+      setStatusSuccess(null);
+    }, 4000);
   }
 
-  async function handleScanTicket(e?: React.FormEvent, codeOverride?: string) {
-    if (e) e.preventDefault();
-    const payload = (codeOverride ?? qrInput).trim();
-    if (!payload) return;
-
-    if (isScanning) return;
-
-    setIsScanning(true);
-    setScanResult(null);
-    setQrInput(payload);
-    lastScannedRef.current = payload;
-
+  async function validateTicket(code: string) {
+    if (!code) {
+      showStatus('Ticket code is empty', false);
+      return;
+    }
+    const payload = { qrCode: code };
     try {
       const res = await fetch(`${API_URL}/driver/scan`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ qrCode: payload })
+        body: JSON.stringify(payload),
       });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (res.ok) {
-        setScanResult(data);
-        if (data?.valid && cameraActive) {
-          stopCamera();
+      const data: ScanResult = await res.json().catch(() => ({} as ScanResult));
+      if (res.ok && data.valid) {
+        showStatus(data.message || 'Ticket validated', true);
+        // Add to recent scans
+        if (data.ticket) {
+          const newScan: RecentScan = {
+            id: code,
+            passengerName: data.ticket.commuter?.name || 'Unknown',
+            seatNumber: data.ticket.seatNumber || 'N/A',
+            timestamp: new Date(),
+            valid: true
+          };
+          setRecentScans(prev => [newScan, ...prev].slice(0, 5));
         }
       } else {
-        setScanResult({
-          valid: false,
-          message: data?.message || data?.error || 'Ticket already used or invalid',
-          ticket: data?.ticket
-        });
+        showStatus(data.message || (data as any).error || 'Validation failed', false);
+        // Add failed scan to recent scans
+        const newScan: RecentScan = {
+          id: code,
+          passengerName: 'Invalid Ticket',
+          seatNumber: '-',
+          timestamp: new Date(),
+          valid: false
+        };
+        setRecentScans(prev => [newScan, ...prev].slice(0, 5));
       }
-    } catch (error) {
-      setScanResult({
-        valid: false,
-        message: 'Error scanning ticket'
-      });
-    } finally {
-      setIsScanning(false);
+      return data;
+    } catch (err: any) {
+      showStatus(err?.message || 'Network error', false);
+      return null;
     }
   }
 
-  async function startCamera() {
-    setCameraError(null);
-    lastScannedRef.current = null;
-    
-    // Check if camera API is available
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setCameraError('Camera API not supported in this environment');
-      setScanMode('manual');
+  async function onQrResult(result: any, error: any) {
+    if (!!result) {
+      const code = typeof result === 'string' ? result : result?.text ?? '';
+      if (code) {
+        setScanning(false);
+        await validateTicket(code);
+      }
+    }
+  }
+
+  async function handleManualSubmit(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!manualCode.trim()) {
+      showStatus('Enter a ticket code', false);
       return;
     }
+    await validateTicket(manualCode.trim());
+    setManualCode('');
+  }
 
+  async function getCurrentPositionOnce() {
+    if (!navigator.geolocation) {
+      showStatus('Geolocation not supported', false);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setPosition({ lat, lng });
+      },
+      (err) => {
+        showStatus(err.message || 'Failed to get location', false);
+      },
+      { enableHighAccuracy: true, maximumAge: 5000 }
+    );
+  }
+
+  async function shareLocation(payload: {
+    busId: number | null;
+    lat: number;
+    lng: number;
+    speed?: number | null;
+    heading?: number | null;
+    accuracy?: number | null;
+  }) {
+    const body = {
+      busId: payload.busId,
+      lat: payload.lat,
+      lng: payload.lng,
+      speed: payload.speed,
+      heading: payload.heading,
+      accuracy: payload.accuracy,
+    };
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } 
+      const res = await fetch(`${API_URL}/driver/location`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
       });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        setCameraActive(true);
-        setCameraError(null);
-        // Kick off decoding once the video is ready
-        setTimeout(() => {
-          startDecoding();
-        }, 300);
-      }
-    } catch (error: any) {
-      // Camera errors are expected in iframe/embedded environments - handle gracefully
-      let errorMessage = 'Camera access not available. ';
-      if (error.name === 'NotAllowedError') {
-        errorMessage = 'Camera access is blocked in this environment. Please use manual entry below.';
-      } else if (error.name === 'NotFoundError') {
-        errorMessage = 'No camera found on this device. Please use manual entry below.';
-      } else if (error.name === 'NotReadableError') {
-        errorMessage = 'Camera is already in use by another application.';
-      } else if (error.name === 'SecurityError') {
-        errorMessage = 'Camera access blocked due to security restrictions. Use manual entry below.';
+      if (res.ok) {
+        showStatus('Location updated', true);
       } else {
-        errorMessage = 'Camera not available. Please use manual entry below.';
+        const bodyErr = await res.json().catch(() => ({}));
+        showStatus(bodyErr?.message || 'Failed to update location', false);
       }
-      
-      setCameraError(errorMessage);
-      setScanMode('manual');
+    } catch (err: any) {
+      showStatus(err?.message || 'Network error', false);
     }
   }
 
-  function stopCamera() {
-    codeReaderRef.current?.reset();
-    lastScannedRef.current = null;
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-      setCameraActive(false);
+  function startLiveSharing() {
+    if (!navigator.geolocation) {
+      showStatus('Geolocation not supported', false);
+      return;
     }
+    if (!selectedBusId) {
+      showStatus('Select a bus to share location', false);
+      return;
+    }
+    getCurrentPositionOnce();
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const speed = pos.coords.speed ?? null;
+        const heading = pos.coords.heading ?? null;
+        const accuracy = pos.coords.accuracy ?? null;
+        setPosition({ lat, lng });
+        shareLocation({ busId: selectedBusId, lat, lng, speed, heading, accuracy });
+      },
+      (err) => {
+        showStatus(err.message || 'Geolocation error', false);
+      },
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 }
+    );
+    watchIdRef.current = id as unknown as number;
+    setLiveSharing(true);
   }
 
-  function startDecoding() {
-    if (!codeReaderRef.current || !videoRef.current) return;
-
-    codeReaderRef.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
-      if (result) {
-        const text = result.getText();
-        if (text && text !== lastScannedRef.current) {
-          lastScannedRef.current = text;
-          handleScanTicket(undefined, text);
-        }
-      }
-    });
+  function stopLiveSharing() {
+    if (watchIdRef.current !== null && navigator.geolocation.clearWatch) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+    }
+    watchIdRef.current = null;
+    setLiveSharing(false);
+    showStatus('Stopped sharing location', true);
   }
 
   useEffect(() => {
-    if (scanMode === 'camera') {
-      startCamera();
-    } else {
-      stopCamera();
-      setCameraError(null);
-    }
-    return () => stopCamera();
-  }, [scanMode]);
+    return () => {
+      if (watchIdRef.current !== null && navigator.geolocation.clearWatch) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+    };
+  }, []);
 
-  function startTracking() {
-    if (!selectedBusId) {
-      alert('Please select a bus first');
-      return;
-    }
-    setIsTracking(true);
-  }
-
-  function stopTracking() {
-    setIsTracking(false);
-    setCurrentLocation(null);
-    setGpsError(null);
-  }
-
-  function handleManualLocationSet() {
-    if (!selectedBusId) {
-      alert('Please select a bus before sharing location');
-      return;
-    }
-
-    const lat = parseFloat(manualLat);
-    const lng = parseFloat(manualLng);
-    
-    if (isNaN(lat) || isNaN(lng)) {
-      alert('Please enter valid coordinates');
-      return;
-    }
-    
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      alert('Invalid coordinates. Latitude must be between -90 and 90, Longitude between -180 and 180');
-      return;
-    }
-    
-    setCurrentLocation({ lat, lng });
-    updateLocation(lat, lng);
-    setGpsError(null);
-  }
-
-  const derivedStatus = scanResult
-    ? (scanResult.valid ? 'VALID' : scanResult?.ticket?.status === 'checked_in' ? 'USED' : 'INVALID')
-    : null;
-
-  const statusClass = derivedStatus === 'VALID'
-    ? 'bg-green-100 text-green-700 border-green-300'
-    : derivedStatus === 'USED'
-      ? 'bg-orange-100 text-orange-700 border-orange-300'
-      : 'bg-red-100 text-red-700 border-red-300';
+  if (loading) return <div style={{ padding: 16 }}>Loading...</div>;
+  if (!user) return <div style={{ padding: 16 }}>Please sign in.</div>;
+  if (user.role !== 'driver') return <div style={{ padding: 16 }}>Access denied: Driver only.</div>;
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Top Bar */}
       <div className="border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <Bus className="w-6 h-6 text-[#0077B6]" />
             <div>
-              <h1 style={{ fontFamily: 'Montserrat, sans-serif' }}>Driver Portal</h1>
-              <p className="text-sm text-muted-foreground">{user?.name}</p>
+              <h1 className="text-xl font-bold" style={{ fontFamily: 'Montserrat, sans-serif' }}>Driver Dashboard</h1>
+              <p className="text-sm text-muted-foreground">{user.name || user.email}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {onSettings && (
-              <Button variant="outline" size="sm" onClick={onSettings}>
-                <Settings className="w-4 h-4 mr-2" />
-                Settings
-              </Button>
-            )}
             <ThemeToggle />
             <Button variant="outline" size="sm" onClick={signOut}>
               <LogOut className="w-4 h-4 mr-2" />
@@ -370,47 +335,57 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
         </div>
       </div>
 
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
-        {contextError && (
-          <Alert className="mb-4 border-orange-300 bg-orange-50 dark:bg-orange-950">
-            <AlertCircle className="h-5 w-5 text-[#F4A261]" />
-            <AlertDescription>
-              <p className="text-sm">{contextError}</p>
-            </AlertDescription>
-          </Alert>
-        )}
+      <div className="container mx-auto px-4 py-6 max-w-6xl">
+        {/* Bus Selection Card */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+              <Bus className="w-5 h-5" />
+              Active Bus
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Select value={selectedBusId?.toString() || ''} onValueChange={(val: string) => setSelectedBusId(val ? Number(val) : null)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select your bus" />
+              </SelectTrigger>
+              <SelectContent>
+                {buses.map((b) => (
+                  <SelectItem key={b.id} value={b.id.toString()}>
+                    {b.plateNumber ? `${b.plateNumber}` : `Bus ${b.id}`}{' '}
+                    {b.routeFrom ? `— ${b.routeFrom} → ${b.routeTo}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CardContent>
+        </Card>
+
         <Tabs defaultValue="scanner" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="scanner">Ticket Verification</TabsTrigger>
-            <TabsTrigger value="tracking">GPS Tracking</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 mb-6">
+            <TabsTrigger value="scanner" className="text-base">
+              <QrCode className="w-4 h-4 mr-2" />
+              Ticket Scanner
+            </TabsTrigger>
+            <TabsTrigger value="tracking" className="text-base">
+              <Navigation className="w-4 h-4 mr-2" />
+              Location Tracking
+            </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="scanner">
+          {/* Ticket Scanner Tab */}
+          <TabsContent value="scanner" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                  <QrCode className="w-5 h-5" />
-                  Scan & Verify Tickets
-                </CardTitle>
-                <CardDescription>
-                  Choose your preferred scanning method
-                </CardDescription>
+                <CardTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>Scan & Verify Tickets</CardTitle>
+                <CardDescription>Use camera or enter ticket code manually</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 {/* Scan Mode Toggle */}
-                {cameraError && (
-                  <Alert className="border-[#F4A261] bg-orange-50 dark:bg-orange-950">
-                    <AlertCircle className="h-5 w-5 text-[#F4A261]" />
-                    <AlertDescription>
-                      <p className="text-sm">{cameraError}</p>
-                    </AlertDescription>
-                  </Alert>
-                )}
-
                 <div className="flex gap-2">
                   <Button
                     variant={scanMode === 'manual' ? 'default' : 'outline'}
-                    onClick={() => setScanMode('manual')}
+                    onClick={() => { setScanMode('manual'); setScanning(false); }}
                     className={scanMode === 'manual' ? 'bg-[#0077B6] hover:bg-[#005a8c]' : ''}
                   >
                     <Keyboard className="w-4 h-4 mr-2" />
@@ -426,328 +401,167 @@ export function DriverDashboard({ onSettings }: DriverDashboardProps) {
                   </Button>
                 </div>
 
-                {scanMode === 'manual' ? (
-                  <form onSubmit={handleScanTicket} className="space-y-4">
+                {/* QR Scanner Section */}
+                {scanMode === 'camera' && (
+                  <div className="space-y-4">
+                    {!scanning ? (
+                      <Button
+                        onClick={() => setScanning(true)}
+                        className="w-full bg-[#0077B6] hover:bg-[#005a8c] h-12"
+                      >
+                        <Camera className="w-5 h-5 mr-2" />
+                        Start QR Scanner
+                      </Button>
+                    ) : (
+                      <>
+                        <div className="relative border-4 border-[#0077B6] rounded-lg overflow-hidden" style={{ minHeight: '400px' }}>
+                          <QrReader
+                            onResult={onQrResult}
+                            constraints={{ facingMode: 'environment' }}
+                            containerStyle={{ width: '100%', height: '400px' }}
+                            videoStyle={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
+                            <p className="text-white text-center font-semibold">Point camera at ticket QR code</p>
+                          </div>
+                        </div>
+                        <Button
+                          onClick={() => setScanning(false)}
+                          variant="outline"
+                          className="w-full h-12"
+                        >
+                          Close Scanner
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Manual Entry Section */}
+                {scanMode === 'manual' && (
+                  <form onSubmit={handleManualSubmit} className="space-y-4">
                     <div className="space-y-2">
-                      <Label>QR Code</Label>
+                      <Label htmlFor="ticketCode" className="text-base font-semibold">Ticket Code</Label>
                       <Input
-                        placeholder="Enter QR Code (e.g., STIX-12345678)"
-                        value={qrInput}
-                        onChange={(e) => setQrInput(e.target.value)}
-                        className="text-lg"
+                        id="ticketCode"
+                        value={manualCode}
+                        onChange={(e) => setManualCode(e.target.value)}
+                        placeholder="Enter ticket code (e.g., STIX-12345678)"
+                        className="h-12 text-lg"
                       />
                     </div>
-                    <Button type="submit" className="w-full bg-[#0077B6] hover:bg-[#005a8c]" disabled={isScanning}>
-                      {isScanning ? 'Verifying...' : 'Verify Ticket'}
+                    <Button type="submit" className="w-full bg-[#F4A261] hover:bg-[#e89350] h-12 text-base font-semibold">
+                      <CheckCircle className="w-5 h-5 mr-2" />
+                      Validate Ticket
                     </Button>
                   </form>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="border-2 border-dashed border-[#0077B6] rounded-lg p-4 bg-[#F5F7FA] dark:bg-[#2B2D42]">
-                      {cameraActive ? (
-                        <video
-                          ref={videoRef}
-                          autoPlay
-                          playsInline
-                          className="w-full rounded-lg"
-                          style={{ maxHeight: '300px' }}
-                        />
-                      ) : (
-                        <div className="text-center py-12 text-muted-foreground">
-                          <Camera className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                          <p className="mb-2">Camera not available</p>
-                          <p className="text-xs">
-                            {cameraError ? 'Use manual entry below' : 'Initializing camera...'}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label>Or enter QR code manually</Label>
-                      <div className="flex gap-2">
-                        <Input
-                          placeholder="QR Code"
-                          value={qrInput}
-                          onChange={(e) => setQrInput(e.target.value)}
-                        />
-                        <Button onClick={() => handleScanTicket()} className="bg-[#0077B6] hover:bg-[#005a8c]">
-                          Verify
-                        </Button>
-                      </div>
-                    </div>
-
-                    {cameraActive ? (
-                      <p className="text-sm text-muted-foreground text-center">
-                        Point camera at QR code or enter code manually above
-                      </p>
-                    ) : (
-                      <Alert className="bg-[#F5F7FA] dark:bg-[#2B2D42]">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertDescription className="text-xs">
-                          Camera scanning is not available in this environment. 
-                          Please use manual entry for ticket verification.
-                        </AlertDescription>
-                      </Alert>
-                    )}
-                  </div>
                 )}
 
-                {scanResult && (
-                  <div className="pt-4 border-t">
-                    {scanResult.valid ? (
-                      <Alert className="border-[#27AE60] bg-green-50 dark:bg-green-950">
-                        <CheckCircle className="h-5 w-5 text-[#27AE60]" />
-                        <AlertDescription>
-                          <div className="space-y-3">
-                            <div className="flex items-center gap-3 flex-wrap">
-                              <p className="font-bold text-[#27AE60] text-lg">✅ Ticket Verified</p>
-                              {derivedStatus && (
-                                <Badge className={`${statusClass} text-xs px-2 py-1`}>{derivedStatus}</Badge>
-                              )}
-                            </div>
-                            <div className="bg-white dark:bg-[#2B2D42] p-4 rounded-lg space-y-2 text-sm">
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Passenger:</span>
-                                <span className="font-semibold">{scanResult.ticket?.commuter?.name || 'N/A'}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Seat Number:</span>
-                                <span className="font-semibold">{scanResult.ticket?.seatNumber}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Route:</span>
-                                <span className="font-semibold">
-                                  {scanResult.ticket?.schedule?.routeFrom} → {scanResult.ticket?.schedule?.routeTo}
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Departure:</span>
-                                <span className="font-semibold">{scanResult.ticket?.schedule?.departureTime}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Ticket ID:</span>
-                                <span className="font-mono text-xs">{scanResult.ticket?.qrCode}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </AlertDescription>
-                      </Alert>
+                {/* Status Messages */}
+                {statusMessage && (
+                  <Alert className={statusSuccess ? 'border-[#27AE60] bg-green-50 dark:bg-green-950' : 'border-[#E63946] bg-red-50 dark:bg-red-950'}>
+                    {statusSuccess ? (
+                      <CheckCircle className="h-5 w-5 text-[#27AE60]" />
                     ) : (
-                      <Alert className="border-[#E63946] bg-red-50 dark:bg-red-950">
-                        <XCircle className="h-5 w-5 text-[#E63946]" />
-                        <AlertDescription>
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-3 flex-wrap">
-                              <p className="font-bold text-[#E63946] text-lg">❌ {scanResult.message}</p>
-                              {derivedStatus && (
-                                <Badge className={`${statusClass} text-xs px-2 py-1`}>{derivedStatus}</Badge>
-                              )}
-                            </div>
-                            {scanResult.ticket && (
-                              <p className="text-sm">
-                                This ticket has already been used or is invalid.
-                              </p>
-                            )}
-                          </div>
-                        </AlertDescription>
-                      </Alert>
+                      <XCircle className="h-5 w-5 text-[#E63946]" />
                     )}
-                    <Button
-                      variant="outline"
-                      className="w-full mt-4"
-                      onClick={() => {
-                        setScanResult(null);
-                        setQrInput('');
-                        lastScannedRef.current = null;
-                      }}
-                    >
-                      Scan Another Ticket
-                    </Button>
-                  </div>
+                    <AlertDescription className="text-base font-semibold">
+                      {statusMessage}
+                    </AlertDescription>
+                  </Alert>
                 )}
-
-                <div className="pt-6 border-t">
-                  <h3 className="font-semibold mb-3" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                    Verification Methods
-                  </h3>
-                  <div className="space-y-2 text-sm text-muted-foreground">
-                    <p className="flex items-start gap-2">
-                      <Keyboard className="w-4 h-4 mt-0.5 text-[#0077B6]" />
-                      <span><strong>Manual Entry:</strong> Type or paste the QR code from passenger's ticket</span>
-                    </p>
-                    <p className="flex items-start gap-2">
-                      <Camera className="w-4 h-4 mt-0.5 text-[#0077B6]" />
-                      <span><strong>Camera Scan:</strong> Point camera at QR code for instant verification</span>
-                    </p>
-                  </div>
-                </div>
               </CardContent>
             </Card>
+
+            {/* Recent Scans */}
+            {recentScans.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>Recent Scans</CardTitle>
+                  <CardDescription>Last 5 ticket validations</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {recentScans.map((scan, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                          {scan.valid ? (
+                            <CheckCircle className="w-5 h-5 text-[#27AE60]" />
+                          ) : (
+                            <XCircle className="w-5 h-5 text-[#E63946]" />
+                          )}
+                          <div>
+                            <p className="font-semibold">{scan.passengerName}</p>
+                            <p className="text-sm text-muted-foreground">Seat: {scan.seatNumber}</p>
+                          </div>
+                        </div>
+                        <Badge variant={scan.valid ? 'default' : 'destructive'} className={scan.valid ? 'bg-[#27AE60]' : 'bg-[#E63946]'}>
+                          {scan.valid ? 'Valid' : 'Invalid'}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
-          <TabsContent value="tracking">
+          {/* Location Tracking Tab */}
+          <TabsContent value="tracking" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                  <Navigation className="w-5 h-5" />
-                  GPS Location Sharing
-                </CardTitle>
-                <CardDescription>
-                  Share your real-time location with passengers
-                </CardDescription>
+                <CardTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>GPS Location Sharing</CardTitle>
+                <CardDescription>Share your real-time location with passengers</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Select Your Bus</Label>
-                    <select
-                      className="w-full p-2 border rounded-md bg-background"
-                      value={selectedBusId}
-                      onChange={(e) => setSelectedBusId(e.target.value)}
-                      disabled={isTracking || contextLoading || assignedBuses.length === 0}
-                    >
-                      <option value="">{contextLoading ? 'Loading buses...' : 'Choose a bus'}</option>
-                      {assignedBuses.map((bus) => (
-                        <option key={bus.id} value={bus.id}>
-                          {bus.plateNumber}
-                          {bus.routeFrom && bus.routeTo ? ` - ${bus.routeFrom} -> ${bus.routeTo}` : ''}
-                        </option>
-                      ))}
-                    </select>
-                    {assignedBuses.length === 0 && !contextLoading && (
-                      <p className="text-xs text-muted-foreground">No buses assigned to your profile.</p>
-                    )}
-                  </div>
-
-                  <div className="flex gap-2">
-                    <Button
-                      className="flex-1"
-                      variant={useManualLocation ? 'outline' : 'default'}
-                      onClick={() => setUseManualLocation(false)}
-                      disabled={isTracking}
-                    >
-                      Auto GPS
-                    </Button>
-                    <Button
-                      className="flex-1"
-                      variant={useManualLocation ? 'default' : 'outline'}
-                      onClick={() => setUseManualLocation(true)}
-                      disabled={isTracking}
-                    >
-                      Manual
-                    </Button>
-                  </div>
-
-                  {useManualLocation && !isTracking && (
-                    <div className="space-y-3 p-4 border rounded-lg bg-muted/50">
-                      <p className="text-sm">Enter location coordinates manually</p>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs">Latitude</Label>
-                          <Input
-                            type="number"
-                            step="0.000001"
-                            placeholder="-1.9536"
-                            value={manualLat}
-                            onChange={(e) => setManualLat(e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Longitude</Label>
-                          <Input
-                            type="number"
-                            step="0.000001"
-                            placeholder="30.0606"
-                            value={manualLng}
-                            onChange={(e) => setManualLng(e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      <Button 
-                        size="sm" 
-                        className="w-full bg-[#0077B6] hover:bg-[#005a8c]" 
-                        onClick={handleManualLocationSet}
-                        variant="default"
-                      >
-                        Set Location
-                      </Button>
-                      <p className="text-xs text-muted-foreground">
-                        Example: Kigali is at -1.9536, 30.0606
-                      </p>
-                    </div>
-                  )}
-
-                  {!isTracking ? (
-                    <Button 
-                      className="w-full bg-[#27AE60] hover:bg-[#1e8c4d]" 
-                      onClick={startTracking}
-                      disabled={!selectedBusId || (useManualLocation && !currentLocation) || contextLoading}
-                    >
-                      <MapPin className="w-4 h-4 mr-2" />
-                      {useManualLocation ? 'Start Sharing Location' : 'Start GPS Tracking'}
-                    </Button>
-                  ) : (
-                    <Button className="w-full bg-[#E63946] hover:bg-[#c62f3a]" onClick={stopTracking}>
-                      Stop Tracking
-                    </Button>
-                  )}
-                </div>
-
-                {gpsError && isTracking && !useManualLocation && (
-                  <Alert className="border-[#F4A261] bg-orange-50 dark:bg-orange-950">
-                    <AlertCircle className="h-5 w-5 text-[#F4A261]" />
-                    <AlertDescription>
-                      <p className="text-[#F4A261]">{gpsError}</p>
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {isTracking && currentLocation && (
-                  <Alert className="border-[#0077B6] bg-blue-50 dark:bg-blue-950">
-                    <MapPin className="h-5 w-5 text-[#0077B6]" />
-                    <AlertDescription>
-                      <div className="space-y-2">
-                        <p className="font-bold text-[#0077B6]">
-                          📍 {useManualLocation ? 'Location Sharing Active' : 'GPS Tracking Active'}
-                        </p>
-                        <div className="text-sm space-y-1">
-                          <p>Your location is being shared with passengers</p>
-                          <p className="font-mono text-xs">
-                            Lat: {currentLocation.lat.toFixed(6)}, Lng: {currentLocation.lng.toFixed(6)}
+                {!liveSharing ? (
+                  <Button
+                    onClick={startLiveSharing}
+                    disabled={!selectedBusId}
+                    className="w-full bg-[#27AE60] hover:bg-[#1e8c4d] h-14 text-base font-bold"
+                  >
+                    <MapPin className="w-5 h-5 mr-2" />
+                    Start Sharing Location
+                  </Button>
+                ) : (
+                  <div className="space-y-4">
+                    <Alert className="border-[#27AE60] bg-green-50 dark:bg-green-950">
+                      <MapPin className="h-5 w-5 text-[#27AE60]" />
+                      <AlertDescription>
+                        <p className="font-bold text-[#27AE60] text-base mb-2">Location Sharing Active</p>
+                        <p className="text-sm">Your location is being shared with passengers in real-time</p>
+                        {position && (
+                          <p className="text-xs font-mono mt-2">
+                            {position.lat.toFixed(6)}, {position.lng.toFixed(6)}
                           </p>
-                          {useManualLocation && (
-                            <p className="text-xs italic">Using manual location mode</p>
-                          )}
-                        </div>
-                      </div>
-                    </AlertDescription>
-                  </Alert>
+                        )}
+                      </AlertDescription>
+                    </Alert>
+                    <Button
+                      onClick={stopLiveSharing}
+                      variant="destructive"
+                      className="w-full h-14 text-base font-bold bg-[#E63946] hover:bg-[#c62f3a]"
+                    >
+                      Stop Sharing Location
+                    </Button>
+                  </div>
                 )}
 
-                {isTracking && !currentLocation && (
-                  <Alert className="border-[#0077B6] bg-blue-50 dark:bg-blue-950">
-                    <MapPin className="h-5 w-5 text-[#0077B6]" />
-                    <AlertDescription>
-                      <p>Waiting for location data...</p>
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                <div className="pt-6 border-t">
-                  <h3 className="font-semibold mb-3" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                    Location Tracking Info
-                  </h3>
-                  <div className="text-sm text-muted-foreground space-y-2">
-                    <p><strong>Auto GPS Mode:</strong></p>
-                    <p>• Uses your device's GPS (requires location permission)</p>
-                    <p>• Updates automatically in real-time</p>
-                    <p className="text-xs">Note: GPS may not work in embedded environments</p>
-                    
-                    <p className="pt-2"><strong>Manual Mode:</strong></p>
-                    <p>• Enter coordinates manually for demo/testing</p>
-                    <p>• Perfect for prototyping or when GPS is unavailable</p>
-                    <p>• Location updates every 5 seconds once set</p>
+                {/* Map Display */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold" style={{ fontFamily: 'Montserrat, sans-serif' }}>Current Location</h3>
+                    <Button
+                      onClick={getCurrentPositionOnce}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <Navigation className="w-4 h-4 mr-2" />
+                      Update Now
+                    </Button>
+                  </div>
+                  <div className="border-2 border-muted rounded-lg overflow-hidden" style={{ height: '350px' }}>
+                    <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
                   </div>
                 </div>
               </CardContent>
