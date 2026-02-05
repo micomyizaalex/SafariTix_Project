@@ -27,6 +27,13 @@ const Schedule = sequelize.define(
       defaultValue: "scheduled",
     },
 
+    ticket_status: {
+      type: DataTypes.ENUM('OPEN','CLOSED'),
+      allowNull: false,
+      defaultValue: 'OPEN',
+      // ticket_status: 'OPEN' or 'CLOSED'
+    },
+
     created_by: { type: DataTypes.UUID, allowNull: false },
   },
   {

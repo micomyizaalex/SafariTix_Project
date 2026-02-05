@@ -10,7 +10,7 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
             rejectUnauthorized: false
         }
     },
-    logging: false,
+    logging: process.env.SEQ_LOGGING === 'true' ? console.log : false,
     pool: {
         max: 5,
         min: 0,

@@ -36,7 +36,7 @@ const Payment = sequelize.define(
     },
 
     status: {
-      type: DataTypes.ENUM("PENDING", "SUCCESS", "FAILED"),
+      type: DataTypes.STRING,
       defaultValue: "PENDING",
     },
 

@@ -17,6 +17,7 @@ const authenticate = (req, res, next) => {
 
     req.userId = decoded.userId;
     req.userRole = decoded.role;
+    console.log('authenticate: token decoded', { userId: req.userId, role: req.userRole });
     
     next();
   } catch (error) {

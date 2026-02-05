@@ -45,6 +45,10 @@ const Driver = sequelize.define(
     tableName: "drivers",
     timestamps: true,
     underscored: true,
+    indexes: [
+      { unique: true, fields: ['license_number'] },
+      { unique: true, fields: ['company_id', 'phone'] }
+    ]
   }
 );
 

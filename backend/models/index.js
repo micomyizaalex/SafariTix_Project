@@ -13,6 +13,7 @@ const Schedule = require("./Schedule");
 const Ticket = require("./Ticket");
 const Location = require("./Location");
 const Payment = require("./Payment");
+const ScheduleJournal = require('./ScheduleJournal');
 
 // ============================================
 // RELATIONSHIPS / ASSOCIATIONS
@@ -76,6 +77,7 @@ Schedule.belongsTo(User, { foreignKey: "created_by" });
 Schedule.hasMany(Journal, { foreignKey: "schedule_id" });
 Schedule.hasMany(Ticket, { foreignKey: "schedule_id" });
 Schedule.hasMany(Location, { foreignKey: "schedule_id" });
+Schedule.hasMany(ScheduleJournal, { foreignKey: 'schedule_id', as: 'journals' });
 
 // Payment relationships
 Payment.belongsTo(User, { foreignKey: "user_id" });
@@ -116,4 +118,5 @@ module.exports = {
   Ticket,
   Location,
   Payment
+  ,ScheduleJournal
 }

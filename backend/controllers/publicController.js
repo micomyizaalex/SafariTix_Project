@@ -19,6 +19,12 @@ const getAvailableSchedules = async (req, res) => {
         attributes: ['id', 'origin', 'destination'],
         where: {},
         required: false
+      },
+      {
+        model: Bus,
+        attributes: ['id','plate_number','status'],
+        where: { status: 'ACTIVE' },
+        required: true
       }
     ];
 
@@ -50,13 +56,22 @@ const getAvailableSchedules = async (req, res) => {
         'price_per_seat',
         'available_seats',
         'booked_seats',
-        'status'
+        'status',
+        'ticket_status'
       ]
     });
 
     // Map and filter schedules with available seats
+    const now = new Date();
+
     const mapped = schedules
       .filter(s => s.available_seats > 0) // Only include schedules with available seats
+      .filter(s => {
+        // Exclude schedules where ticket sales are closed or departure time has passed
+        if (s.ticket_status === 'CLOSED') return false;
+        if (s.departure_time && new Date(s.departure_time) <= now) return false;
+        return true;
+      })
       .map(s => ({
         id: s.id,
         busId: s.bus_id,
@@ -69,6 +84,9 @@ const getAvailableSchedules = async (req, res) => {
         seatsAvailable: s.available_seats,
         bookedSeats: s.booked_seats || 0,
         status: s.status
+        ,
+        ticketStatus: s.ticket_status || 'OPEN',
+        ticketReason: (s.ticket_status === 'CLOSED') ? 'manual' : null
       }));
 
     res.json({ schedules: mapped });
@@ -102,37 +120,38 @@ const searchSchedules = async (req, res) => {
     const schedules = await Schedule.findAll({
       where: whereClause,
       include: [
-        {
-          model: Route,
-          attributes: ['id', 'origin', 'destination'],
-          required: true,
-          where: {
-            origin: {
-              [Op.iLike]: `%${from}%`
-            },
-            destination: {
-              [Op.iLike]: `%${to}%`
+          {
+            model: Route,
+            attributes: ['id', 'origin', 'destination'],
+            required: true,
+            where: {
+              origin: {
+                [Op.iLike]: `%${from}%`
+              },
+              destination: {
+                [Op.iLike]: `%${to}%`
+              }
             }
+          },
+          {
+            model: Bus,
+            attributes: ['id', 'plate_number', 'company_id', 'driver_id','status'],
+            required: false,
+            where: { status: 'ACTIVE' },
+            include: [
+              {
+                model: Company,
+                attributes: ['id', 'name'],
+                required: false
+              },
+              {
+                model: Driver,
+                attributes: ['id', 'name'],
+                required: false
+              }
+            ]
           }
-        },
-        {
-          model: Bus,
-          attributes: ['id', 'plate_number', 'company_id', 'driver_id'],
-          required: false,
-          include: [
-            {
-              model: Company,
-              attributes: ['id', 'name'],
-              required: false
-            },
-            {
-              model: Driver,
-              attributes: ['id', 'name'],
-              required: false
-            }
-          ]
-        }
-      ],
+        ],
       attributes: [
         'id',
         'bus_id',
@@ -143,11 +162,21 @@ const searchSchedules = async (req, res) => {
         'price_per_seat',
         'available_seats',
         'booked_seats',
-        'status'
+        'status',
+        'ticket_status'
       ]
     });
 
-    const mapped = schedules.map(s => ({
+    const now = new Date();
+
+    const mapped = schedules
+      .filter(s => s.available_seats > 0)
+      .filter(s => {
+        if (s.ticket_status === 'CLOSED') return false;
+        if (s.departure_time && new Date(s.departure_time) <= now) return false;
+        return true;
+      })
+      .map(s => ({
       id: s.id,
       busId: s.bus_id,
       routeFrom: s.Route?.origin || 'N/A',

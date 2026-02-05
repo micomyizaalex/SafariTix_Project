@@ -48,11 +48,15 @@ const initiatePayment = async (req, res) => {
       const scheduleQuery = `
         SELECT 
           s.id,
+          s.departure_time,
+          s.ticket_status,
           s.available_seats,
           s.price_per_seat,
           s.company_id,
-          s.status
+          s.status,
+          b.status as bus_status
         FROM schedules s
+        LEFT JOIN buses b ON s.bus_id = b.id
         WHERE s.id = $1
         FOR UPDATE
       `;
@@ -70,7 +74,7 @@ const initiatePayment = async (req, res) => {
 
       const schedule = scheduleResult.rows[0];
 
-      // Check if schedule is available
+      // Check if schedule is available and bus is active
       if (schedule.status !== 'scheduled') {
         await client.query('ROLLBACK');
         client.release();
@@ -78,6 +82,25 @@ const initiatePayment = async (req, res) => {
           error: 'Schedule not available',
           message: 'This schedule is not available for booking'
         });
+      }
+
+      if (schedule.bus_status && schedule.bus_status !== 'ACTIVE') {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Cannot book schedule on INACTIVE bus' });
+      }
+
+      // Enforce ticket cutoff based on departure_time and ticket_status
+      const now = new Date();
+      if (schedule.ticket_status === 'CLOSED') {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Ticket sales closed for this schedule', message: 'Ticket sales closed for this schedule' });
+      }
+      if (schedule.departure_time && new Date(schedule.departure_time) <= now) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Ticket sales closed for this schedule', message: 'Ticket sales closed for this schedule' });
       }
 
       // Check if enough seats are available
@@ -179,9 +202,14 @@ const confirmPayment = async (req, res) => {
           s.available_seats,
           s.price_per_seat,
           s.company_id,
-          s.status as schedule_status
+          s.status as schedule_status,
+          b.status as bus_status,
+          s.bus_id,
+          s.departure_time,
+          s.ticket_status
         FROM payments p
         INNER JOIN schedules s ON p.schedule_id = s.id
+        LEFT JOIN buses b ON s.bus_id = b.id
         WHERE p.id = $1 AND p.user_id = $2
         FOR UPDATE
       `;
@@ -209,7 +237,7 @@ const confirmPayment = async (req, res) => {
         });
       }
 
-      // Check if schedule is still available
+      // Check if schedule is still available and bus active
       if (payment.schedule_status !== 'scheduled') {
         await client.query('ROLLBACK');
         client.release();
@@ -217,6 +245,25 @@ const confirmPayment = async (req, res) => {
           error: 'Schedule not available',
           message: 'The schedule is no longer available for booking'
         });
+      }
+
+      if (payment.bus_status && payment.bus_status !== 'ACTIVE') {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Cannot book ticket for INACTIVE bus' });
+      }
+
+      // Cutoff enforcement
+      const now2 = new Date();
+      if (payment.ticket_status === 'CLOSED') {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Ticket sales closed for this schedule' });
+      }
+      if (payment.departure_time && new Date(payment.departure_time) <= now2) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Ticket sales closed for this schedule' });
       }
 
       // Update payment status to SUCCESS
@@ -290,9 +337,13 @@ const bookTicket = async (req, res) => {
           s.price_per_seat,
           s.company_id,
           s.status as schedule_status,
-          s.bus_id
+          s.bus_id,
+          b.status as bus_status,
+          s.departure_time,
+          s.ticket_status
         FROM payments p
         INNER JOIN schedules s ON p.schedule_id = s.id
+        LEFT JOIN buses b ON s.bus_id = b.id
         WHERE p.id = $1 AND p.user_id = $2
         FOR UPDATE
       `;
@@ -337,7 +388,7 @@ const bookTicket = async (req, res) => {
         });
       }
 
-      // Check schedule availability
+      // Check schedule availability and bus active
       if (payment.schedule_status !== 'scheduled') {
         await client.query('ROLLBACK');
         client.release();
@@ -345,6 +396,25 @@ const bookTicket = async (req, res) => {
           error: 'Schedule not available',
           message: 'The schedule is no longer available for booking'
         });
+      }
+
+      if (payment.bus_status && payment.bus_status !== 'ACTIVE') {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Cannot book ticket for INACTIVE bus' });
+      }
+
+      // Enforce ticket cutoff
+      const now3 = new Date();
+      if (payment.ticket_status === 'CLOSED') {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Ticket sales closed for this schedule' });
+      }
+      if (payment.departure_time && new Date(payment.departure_time) <= now3) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Ticket sales closed for this schedule' });
       }
 
       const currentAvailableSeats = parseInt(payment.available_seats);

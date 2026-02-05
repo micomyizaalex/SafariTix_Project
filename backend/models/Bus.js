@@ -25,9 +25,14 @@ const Bus = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
     },
-
     model: {
       type: DataTypes.STRING,
+    },
+
+    seat_layout: {
+      type: DataTypes.ENUM('25','30','50'),
+      allowNull: false,
+      defaultValue: '30'
     },
 
     capacity: {
@@ -35,15 +40,19 @@ const Bus = sequelize.define(
       allowNull: false,
     },
 
-    is_active: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: true,
+    status: {
+      type: DataTypes.ENUM('ACTIVE','INACTIVE'),
+      allowNull: false,
+      defaultValue: 'ACTIVE'
     },
   },
   {
     tableName: "buses",
     timestamps: true,
     underscored: true,
+    indexes: [
+      { unique: true, fields: ['company_id', 'plate_number'] }
+    ]
   }
 );
 

@@ -9,7 +9,7 @@ function roleHomePath(role) {
     case 'company_admin':
       return '/company/dashboard';
     case 'commuter':
-      return '/';
+      return '/dashboard/commuter';
     case 'admin':
       return '/dashboard/admin';
     default:
