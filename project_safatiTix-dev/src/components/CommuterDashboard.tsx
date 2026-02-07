@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { API_URL, supabase } from '../utils/supabase-client';
 import { publicAnonKey } from '../utils/supabase/info';
@@ -21,6 +22,7 @@ interface CommuterDashboardProps {
 
 export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
   const { user, accessToken, signOut } = useAuth();
+  const navigate = useNavigate();
   const [schedules, setSchedules] = useState<any[]>([]);
   const [filteredSchedules, setFilteredSchedules] = useState<any[]>([]);
   const [tickets, setTickets] = useState<any[]>([]);
@@ -558,12 +560,11 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
                                   ) : (
                                     <Button
                                       variant="outline"
-                                      onClick={() => {
-                                        setSelectedSchedule(schedule);
-                                        setNumTickets(1);
-                                      }}
+                                      className="w-full"
+                                      onClick={() => navigate(`/schedules/${schedule.id}`)}
                                     >
-                                      Select
+                                      <Ticket className="w-4 h-4 mr-2" />
+                                      Select Seat
                                     </Button>
                                   )}
                                 </div>

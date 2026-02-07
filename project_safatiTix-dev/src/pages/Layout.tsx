@@ -1,34 +1,28 @@
-import React, { useEffect } from 'react'
-import TopBar from '../components/TopBar'
-import { Outlet, useLocation } from 'react-router-dom'
+import React from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
+import { LandingPage } from '../components/LandingPage';
+import Footer from '../components/Footer';
 
-const Layout = () => {
- const {hash} = useLocation()
-  
- const scrollToSection = (id: string) => {
-    const element = document.getElementById(id);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-
-  useEffect(() => {
-    if(hash){
-      if(hash.startsWith("#")){
-           scrollToSection(hash.substring(1));
-      }
-    }
-  },[hash])
+const Layout = ({ showLanding = false }: { showLanding?: boolean }) => {
+  const location = useLocation();
+  const hideFooter = location.pathname === '/app/login' || location.pathname === '/app/signup';
 
   return (
-    <div className="min-h-screen bg-background">
-       <TopBar/>
-       <main>
-            <Outlet/>
-       </main>
-    </div>
-  )
-}
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+      {/* If landing page, render its hero content */}
+      {showLanding && <LandingPage />}
 
-export default Layout
+      {/* Main content for other pages */}
+      {!showLanding && (
+        <main style={{ flex: 1 }}>
+          <Outlet />
+        </main>
+      )}
+
+      {/* Footer - Hidden on login/signup pages */}
+      {!hideFooter && <Footer />}
+    </div>
+  );
+};
+
+export default Layout;

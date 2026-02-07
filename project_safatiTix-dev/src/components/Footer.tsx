@@ -1,99 +1,127 @@
-import React,{useState} from 'react'
-import { 
-  Bus, 
-  Search, 
-  Ticket, 
-  MapPin, 
-  Users, 
-  TrendingUp, 
-  Moon, 
-  Sun,
-  Menu,
-  X,
-  Facebook,
-  Instagram,
-  Linkedin,
-  Mail,
-  Phone,
-  MapPinned
-} from 'lucide-react';
-
+import React, { CSSProperties } from 'react';
+import { Bus } from 'lucide-react';
 
 const Footer = () => {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-     const scrollToSection = (id: string) => {
-    const element = document.getElementById(id);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-      setMobileMenuOpen(false);
-    }
+  const styles: Record<string, CSSProperties> = {
+    footer: {
+      padding: '48px 16px',
+      background: '#2B2D42',
+      color: 'white',
+    },
+    container: {
+      maxWidth: '1280px',
+      margin: '0 auto',
+    },
+    footerGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+      gap: '32px',
+      marginBottom: '32px',
+    },
+    footerTitle: {
+      fontWeight: 'bold',
+      fontFamily: 'Montserrat, sans-serif',
+      marginBottom: '16px',
+    },
+    footerLinks: {
+      listStyle: 'none',
+      padding: 0,
+      margin: 0,
+    },
+    footerLink: {
+      color: 'rgba(255, 255, 255, 0.7)',
+      textDecoration: 'none',
+      display: 'block',
+      padding: '8px 0',
+      fontSize: '0.875rem',
+      transition: 'color 0.2s',
+      cursor: 'pointer',
+    },
+    footerBottom: {
+      borderTop: '1px solid rgba(255, 255, 255, 0.2)',
+      paddingTop: '32px',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      flexWrap: 'wrap' as const,
+      gap: '16px',
+    },
+    copyright: {
+      color: 'rgba(255, 255, 255, 0.7)',
+      fontSize: '0.875rem',
+    },
+    footerBottomLinks: {
+      display: 'flex',
+      gap: '16px',
+    },
+    logo: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+      marginBottom: '16px',
+    },
+    logoText: {
+      fontSize: '1.25rem',
+      fontWeight: 'bold',
+      color: 'white',
+      fontFamily: 'Montserrat, sans-serif',
+    },
   };
 
-  
   return (
-
-      <footer className="bg-gray-900 text-white py-12">
-        <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-4 gap-8 mb-8">
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <div className="bg-[#006AFF] text-white p-2 rounded-lg">
-                  <Bus className="w-5 h-5" />
-                </div>
-                <span className="font-bold text-lg" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                  SafariTix
-                </span>
-              </div>
-              <p className="text-gray-400 text-sm">
-                Revolutionizing bus travel across Rwanda with modern technology and exceptional service.
-              </p>
+    <footer style={styles.footer}>
+      <div style={styles.container}>
+        <div style={styles.footerGrid}>
+          {/* Brand */}
+          <div>
+            <div style={styles.logo}>
+              <Bus style={{ width: '32px', height: '32px', color: '#0077B6' }} />
+              <span style={styles.logoText}>SafariTix</span>
             </div>
-
-            <div>
-              <h4 className="font-bold mb-4" style={{ fontFamily: 'Montserrat, sans-serif' }}>Quick Links</h4>
-              <ul className="space-y-2 text-sm">
-                <li><button onClick={() => scrollToSection('home')} className="text-gray-400 hover:text-[#006AFF]">Home</button></li>
-                <li><button onClick={() => scrollToSection('how-it-works')} className="text-gray-400 hover:text-[#006AFF]">How it Works</button></li>
-                <li><button onClick={() => scrollToSection('achievements')} className="text-gray-400 hover:text-[#006AFF]">Achievements</button></li>
-                <li><button onClick={() => scrollToSection('team')} className="text-gray-400 hover:text-[#006AFF]">Team</button></li>
-              </ul>
-            </div>
-
-            <div>
-              <h4 className="font-bold mb-4" style={{ fontFamily: 'Montserrat, sans-serif' }}>Company</h4>
-              <ul className="space-y-2 text-sm">
-                <li><a href="#" className="text-gray-400 hover:text-[#006AFF]">About Us</a></li>
-                <li><a href="#" className="text-gray-400 hover:text-[#006AFF]">Careers</a></li>
-                <li><a href="#" className="text-gray-400 hover:text-[#006AFF]">Privacy Policy</a></li>
-                <li><a href="#" className="text-gray-400 hover:text-[#006AFF]">Terms of Service</a></li>
-              </ul>
-            </div>
-
-            <div>
-              <h4 className="font-bold mb-4" style={{ fontFamily: 'Montserrat, sans-serif' }}>Connect</h4>
-              <div className="flex gap-3 mb-4">
-                <a href="#" className="p-2 bg-gray-800 hover:bg-[#006AFF] rounded-lg transition-colors">
-                  <Facebook className="w-5 h-5" />
-                </a>
-                <a href="#" className="p-2 bg-gray-800 hover:bg-[#006AFF] rounded-lg transition-colors">
-                  <Instagram className="w-5 h-5" />
-                </a>
-                <a href="#" className="p-2 bg-gray-800 hover:bg-[#006AFF] rounded-lg transition-colors">
-                  <Linkedin className="w-5 h-5" />
-                </a>
-              </div>
-              <p className="text-gray-400 text-sm">support@safaritix.rw</p>
-            </div>
+            <p style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: '0.875rem' }}>
+              Modern bus ticketing, tracking and subscriptions across Rwanda.
+            </p>
           </div>
 
-          <div className="border-t border-gray-800 pt-8 text-center text-sm text-gray-400">
-            <p>&copy; 2025 SafariTix. All rights reserved.</p>
+          {/* Quick Links */}
+          <div>
+            <h4 style={styles.footerTitle}>Quick Links</h4>
+            <ul style={styles.footerLinks}>
+              <li><a href="/" style={styles.footerLink} onMouseEnter={(e) => e.currentTarget.style.color = '#F4A261'} onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.7)'}>Home</a></li>
+              <li><a href="#features" style={styles.footerLink} onMouseEnter={(e) => e.currentTarget.style.color = '#F4A261'} onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.7)'}>Features</a></li>
+              <li><a href="#pricing" style={styles.footerLink} onMouseEnter={(e) => e.currentTarget.style.color = '#F4A261'} onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.7)'}>Pricing</a></li>
+              <li><a href="#support" style={styles.footerLink} onMouseEnter={(e) => e.currentTarget.style.color = '#F4A261'} onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.7)'}>Support</a></li>
+            </ul>
+          </div>
+
+          {/* For Business */}
+          <div>
+            <h4 style={styles.footerTitle}>For Business</h4>
+            <ul style={styles.footerLinks}>
+              <li><a href="/app/signup" style={styles.footerLink} onMouseEnter={(e) => e.currentTarget.style.color = '#F4A261'} onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.7)'}>Company Signup</a></li>
+              <li><a href="/dashboard/driver" style={styles.footerLink} onMouseEnter={(e) => e.currentTarget.style.color = '#F4A261'} onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.7)'}>Driver Portal</a></li>
+              <li><a href="#api" style={styles.footerLink} onMouseEnter={(e) => e.currentTarget.style.color = '#F4A261'} onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.7)'}>API</a></li>
+            </ul>
+          </div>
+
+          {/* Contact */}
+          <div>
+            <h4 style={styles.footerTitle}>Contact</h4>
+            <p style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: '0.875rem', margin: '8px 0' }}>info@safaritix.rw</p>
+            <p style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: '0.875rem', margin: '8px 0' }}>+250 793 216 602</p>
           </div>
         </div>
-      </footer>
 
-  )
-}
+        <div style={styles.footerBottom}>
+          <p style={styles.copyright}>© 2026 SafariTix. All rights reserved.</p>
+          <div style={styles.footerBottomLinks}>
+            <a href="#privacy" style={styles.footerLink} onMouseEnter={(e) => e.currentTarget.style.color = '#F4A261'} onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.7)'}>Privacy Policy</a>
+            <a href="#terms" style={styles.footerLink} onMouseEnter={(e) => e.currentTarget.style.color = '#F4A261'} onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.7)'}>Terms of Service</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+};
 
-export default Footer
+export default Footer;
