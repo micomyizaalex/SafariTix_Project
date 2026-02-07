@@ -7,14 +7,18 @@ const { Pool } = require("pg");
  */
 
 // Validate DATABASE_URL is set
-if (!process.env.DATABASE_URL) {
-  console.error("ERROR: DATABASE_URL environment variable is not set!");
+const rawConn = process.env.DATABASE_URL || '';
+// Trim and strip surrounding quotes if present (dotenv can include quotes in values)
+const connectionString = rawConn.trim().replace(/^'+|'+$/g, '').replace(/^"+|"+$/g, '');
+
+if (!connectionString) {
+  console.error("ERROR: DATABASE_URL environment variable is not set or empty!");
   console.error("Please set DATABASE_URL in your .env file or environment variables.");
 }
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('neon.tech') ? {
+  connectionString,
+  ssl: connectionString && connectionString.includes('neon.tech') ? {
     rejectUnauthorized: false, // Required for Neon PostgreSQL
   } : undefined,
   max: 20, // Maximum number of clients in the pool

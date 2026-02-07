@@ -427,20 +427,38 @@ const bookTicket = async (req, res) => {
         });
       }
 
-      // Calculate seat numbers (simple sequential assignment)
-      const currentBookedSeats = parseInt(payment.booked_seats || 0);
+      // Find available seat numbers from seats table for the bus, excluding already confirmed tickets and active locks
+      const availableSeatsQuery = `
+        SELECT s.seat_number FROM seats s
+        WHERE s.bus_id = $1
+        AND s.seat_number NOT IN (
+          SELECT seat_number FROM tickets WHERE schedule_id = $2 AND status IN ('CONFIRMED','CHECKED_IN')
+        )
+        AND s.seat_number NOT IN (
+          SELECT seat_number FROM seat_locks WHERE schedule_id = $2 AND status = 'ACTIVE' AND expires_at > NOW()
+        )
+        ORDER BY s.seat_number ASC
+        LIMIT $3
+      `;
+
+      const availableResult = await client.query(availableSeatsQuery, [payment.bus_id, payment.schedule_id, numTickets]);
+      const seatRows = availableResult.rows || [];
+      if (seatRows.length < numTickets) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Insufficient available seats', message: 'Not enough available seats to fulfill request' });
+      }
+
       const tickets = [];
-      
       for (let i = 0; i < numTickets; i++) {
-        const seatNumber = (currentBookedSeats + i + 1).toString().padStart(2, '0');
+        const seatNumber = seatRows[i].seat_number;
         const bookingRef = `BK-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-        
         const ticketId = generateUUID();
         const ticketQuery = `
           INSERT INTO tickets (
             id, passenger_id, schedule_id, company_id, payment_id,
             seat_number, booking_ref, price, status, booked_at, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW(), NOW())
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CONFIRMED', NOW(), NOW(), NOW())
           RETURNING *
         `;
 
@@ -452,8 +470,7 @@ const bookTicket = async (req, res) => {
           paymentId,
           seatNumber,
           bookingRef,
-          payment.price_per_seat,
-          'booked'
+          payment.price_per_seat
         ]);
 
         tickets.push(ticketResult.rows[0]);

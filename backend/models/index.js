@@ -14,6 +14,8 @@ const Ticket = require("./Ticket");
 const Location = require("./Location");
 const Payment = require("./Payment");
 const ScheduleJournal = require('./ScheduleJournal');
+const Seat = require('./Seat');
+const SeatLock = require('./SeatLock');
 
 // ============================================
 // RELATIONSHIPS / ASSOCIATIONS
@@ -48,6 +50,7 @@ Bus.hasMany(DriverAssignment, { foreignKey: "bus_id" });
 Bus.hasMany(Journal, { foreignKey: "bus_id" });
 Bus.hasMany(Schedule, { foreignKey: "bus_id" });
 Bus.hasMany(Location, { foreignKey: "bus_id" });
+Bus.hasMany(Seat, { foreignKey: "bus_id" });
 
 // Driver relationships
 Driver.belongsTo(Company, { foreignKey: "company_id" });
@@ -78,6 +81,7 @@ Schedule.hasMany(Journal, { foreignKey: "schedule_id" });
 Schedule.hasMany(Ticket, { foreignKey: "schedule_id" });
 Schedule.hasMany(Location, { foreignKey: "schedule_id" });
 Schedule.hasMany(ScheduleJournal, { foreignKey: 'schedule_id', as: 'journals' });
+Schedule.hasMany(SeatLock, { foreignKey: 'schedule_id' });
 
 // Payment relationships
 Payment.belongsTo(User, { foreignKey: "user_id" });
@@ -89,6 +93,7 @@ Ticket.belongsTo(User, { foreignKey: "passenger_id", as: "passenger" });
 Ticket.belongsTo(Schedule, { foreignKey: "schedule_id" });
 Ticket.belongsTo(Company, { foreignKey: "company_id" });
 Ticket.belongsTo(Payment, { foreignKey: "payment_id" });
+Ticket.belongsTo(SeatLock, { foreignKey: 'lock_id', as: 'lock' });
 
 // Journal relationships
 Journal.belongsTo(Bus, { foreignKey: "bus_id" });
@@ -118,5 +123,7 @@ module.exports = {
   Ticket,
   Location,
   Payment
+  ,Seat,
+  SeatLock
   ,ScheduleJournal
 }

@@ -21,9 +21,10 @@ const Ticket = sequelize.define(
     price: { type: DataTypes.DECIMAL, allowNull: false },
 
     status: {
-      type: DataTypes.ENUM("booked", "checked_in", "cancelled", "refunded"),
-      defaultValue: "booked",
+      type: DataTypes.ENUM("PENDING_PAYMENT", "CONFIRMED", "CANCELLED", "EXPIRED", "CHECKED_IN"),
+      defaultValue: "PENDING_PAYMENT",
     },
+    lock_id: { type: DataTypes.UUID, allowNull: true },
 
     booked_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
     checked_in_at: { type: DataTypes.DATE },

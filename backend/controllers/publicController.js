@@ -254,6 +254,37 @@ const getLocations = async (req, res) => {
   }
 };
 
+// Get single schedule details and bookability
+const getScheduleById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const schedule = await Schedule.findByPk(id, { include: [Route, Bus] });
+    if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
+    const now = new Date();
+    const bookable = schedule.status === 'scheduled' && schedule.ticket_status !== 'CLOSED' && (!(schedule.departure_time) || new Date(schedule.departure_time) > now);
+    res.json({ schedule: {
+      id: schedule.id,
+      routeId: schedule.route_id,
+      busId: schedule.bus_id,
+      date: schedule.schedule_date,
+      departureTime: schedule.departure_time,
+      arrivalTime: schedule.arrival_time,
+      price: parseFloat(schedule.price_per_seat || 0),
+      availableSeats: schedule.available_seats,
+      bookedSeats: schedule.booked_seats,
+      status: schedule.status,
+      bookable,
+      routeFrom: schedule.Route?.origin || null,
+      routeTo: schedule.Route?.destination || null,
+      busPlate: schedule.Bus?.plate_number || null,
+      busCapacity: schedule.Bus?.capacity || null
+    }});
+  } catch (err) {
+    console.error('getScheduleById error', err);
+    res.status(500).json({ error: 'Failed to fetch schedule' });
+  }
+};
+
 // Get user tickets (requires authentication)
 // Updated to include payment information using pg Pool
 const getTickets = async (req, res) => {
@@ -312,7 +343,7 @@ const getTickets = async (req, res) => {
       paymentMethod: row.payment_method || 'N/A',
       paymentStatus: row.payment_status || 'N/A',
       transactionRef: row.transaction_ref,
-      scanned: row.status === 'checked_in',
+      scanned: row.status === 'CHECKED_IN',
       createdAt: row.created_at || row.booked_at,
       scheduleId: row.schedule_id,
       passengerName: row.passenger_name || 'N/A',
@@ -767,8 +798,8 @@ const scanTicket = async (req, res) => {
       busPlateNumber: row.bus_plate,
       busModel: row.bus_model,
       companyName: row.company_name,
-      isValid: row.status === 'booked' || row.status === 'checked_in',
-      isUsed: row.status === 'checked_in'
+      isValid: row.status === 'CONFIRMED' || row.status === 'CHECKED_IN',
+      isUsed: row.status === 'CHECKED_IN'
     };
 
     res.json({ ticket });
@@ -787,5 +818,6 @@ module.exports = {
   getLocations,
   getTickets,
   getTicketById, // Get single ticket by ID
-  scanTicket // Scan ticket by QR code
+  scanTicket, // Scan ticket by QR code
+  getScheduleById
 };

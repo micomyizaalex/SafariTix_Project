@@ -84,6 +84,34 @@ const startServer = async () => {
       console.error('Server error:', error);
       process.exit(1);
     });
+    // Start background task: expire seat locks
+    const { SeatLock, Ticket } = require('./models');
+    const expireLocks = async () => {
+      try {
+        const now = new Date();
+        const expired = await SeatLock.findAll({ where: { status: 'ACTIVE', expires_at: { [require('sequelize').Op.lte]: now } } });
+        for (const lock of expired) {
+          try {
+            lock.status = 'EXPIRED';
+            await lock.save();
+            if (lock.ticket_id) {
+              const ticket = await Ticket.findByPk(lock.ticket_id);
+              if (ticket && ticket.status === 'PENDING_PAYMENT') {
+                ticket.status = 'EXPIRED';
+                await ticket.save();
+              }
+            }
+          } catch (e) {
+            console.error('Failed to expire lock', lock.id, e.message || e);
+          }
+        }
+      } catch (err) {
+        console.error('expireLocks error', err.message || err);
+      }
+    };
+
+    // Run every 30 seconds
+    setInterval(expireLocks, 30 * 1000);
     
   } catch (error) {
     console.error('Failed to start server:', error);
