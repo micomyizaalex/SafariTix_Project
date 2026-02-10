@@ -194,6 +194,16 @@ const getSchedules = async (req, res) => {
           model: Route,
           attributes: ['origin', 'destination'],
           required: false
+        },
+        {
+          model: Bus,
+          attributes: ['plate_number'],
+          required: false
+        },
+        {
+          model: Driver,
+          attributes: ['name'],
+          required: false
         }
       ]
     });
@@ -202,16 +212,21 @@ const getSchedules = async (req, res) => {
       const price = parseFloat(s.price_per_seat || s.price || 0);
       const bookedSeats = s.booked_seats || 0;
       const availableSeats = s.available_seats ?? s.seats_available ?? 0;
+      const totalSeats = s.total_seats || (bookedSeats + availableSeats) || 0;
       return {
         id: s.id,
         routeFrom: s.Route?.origin || s.route_from || s.from || 'N/A',
         routeTo: s.Route?.destination || s.route_to || s.to || 'N/A',
         departureTime: s.departure_time || s.time || null,
+        scheduleDate: s.schedule_date || s.date || null,
         arrivalTime: s.arrival_time || null,
-        date: s.schedule_date || s.date || null,
         price,
         seatsAvailable: availableSeats,
+        totalSeats,
         bookedSeats,
+        busPlateNumber: s.Bus?.plate_number || null,
+        driverName: s.Driver?.name || null,
+        status: s.status || 'scheduled',
         revenue: bookedSeats * price
       };
     });
@@ -226,22 +241,83 @@ const getTickets = async (req, res) => {
     const userId = req.userId;
     const user = await User.findByPk(userId);
     const companyId = user?.company_id;
-    if (!companyId) return res.json({ tickets: [] });
+    if (!companyId) {
+      console.log('No company ID found for user:', userId);
+      return res.json({ tickets: [] });
+    }
 
-    const tickets = await Ticket.findAll({ where: { company_id: companyId } });
-    const mapped = tickets.map(t => ({
-      id: t.id,
-      price: parseFloat(t.price || 0),
-      paymentStatus: t.payment_status || (t.status === 'booked' ? 'paid' : 'unpaid'),
-      seatNumber: t.seat_number,
-      qrCode: t.qr_code_url || t.qr_code || null,
-      status: t.status,
-      scanned: !!t.checked_in_at,
-      createdAt: t.created_at || t.booked_at || t.createdAt,
-      scheduleId: t.schedule_id
-    }));
+    console.log('Fetching tickets for company:', companyId);
+    
+    const tickets = await Ticket.findAll({ 
+      where: { company_id: companyId },
+      include: [
+        {
+          model: User,
+          as: 'passenger',
+          attributes: ['id', 'full_name', 'email', 'phone_number'],
+          required: false
+        },
+        {
+          model: Schedule,
+          attributes: ['id', 'schedule_date', 'departure_time', 'price_per_seat'],
+          required: false,
+          include: [
+            {
+              model: Route,
+              attributes: ['id', 'origin', 'destination'],
+              required: false
+            },
+            {
+              model: Bus,
+              attributes: ['id', 'plate_number', 'model'],
+              required: false
+            }
+          ]
+        }
+      ],
+      order: [['booked_at', 'DESC']]
+    });
+
+    console.log(`Found ${tickets.length} tickets for company ${companyId}`);
+
+    const mapped = tickets.map(t => {
+      const passenger = t.passenger;
+      const schedule = t.Schedule;
+      const route = schedule?.Route;
+      const bus = schedule?.Bus;
+
+      return {
+        id: t.id,
+        bookingRef: t.booking_ref,
+        price: parseFloat(t.price || 0),
+        paymentStatus: t.status === 'CONFIRMED' || t.status === 'CHECKED_IN' ? 'paid' : 'unpaid',
+        seatNumber: t.seat_number,
+        qrCode: t.qr_code_url || null,
+        status: t.status,
+        scanned: !!t.checked_in_at,
+        bookedAt: t.booked_at,
+        checkedInAt: t.checked_in_at,
+        scheduleId: t.schedule_id,
+        // Passenger info
+        passengerName: passenger ? passenger.full_name : 'N/A',
+        passengerEmail: passenger?.email || 'N/A',
+        passengerPhone: passenger?.phone_number || 'N/A',
+        // Schedule info
+        scheduleDate: schedule?.schedule_date || null,
+        departureTime: schedule?.departure_time || null,
+        // Route info
+        routeFrom: route?.origin || 'N/A',
+        routeTo: route?.destination || 'N/A',
+        // Bus info
+        busPlateNumber: bus?.plate_number || 'N/A',
+        busModel: bus?.model || 'N/A'
+      };
+    });
+
+    console.log(`Returning ${mapped.length} mapped tickets`);
     res.json({ tickets: mapped });
   } catch (error) {
+    console.error('getTickets error:', error);
     res.status(400).json({ error: error.message });
   }
 };
@@ -493,6 +569,80 @@ const createSchedule = async (req, res) => {
   }
 };
 
+const updateSchedule = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const user = await User.findByPk(userId);
+    const companyId = user?.company_id;
+    
+    if (!companyId) {
+      return res.status(403).json({ error: 'No company associated with user' });
+    }
+
+    const scheduleId = req.params.id;
+    const schedule = await Schedule.findByPk(scheduleId);
+
+    if (!schedule || schedule.company_id !== companyId) {
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+
+    const { route_from, route_to, schedule_date, departure_time, bus_plate_number, price_per_seat, total_seats } = req.body;
+
+    // Update schedule fields
+    if (route_from) schedule.route_from = route_from;
+    if (route_to) schedule.route_to = route_to;
+    if (schedule_date) schedule.schedule_date = schedule_date;
+    if (departure_time) schedule.departure_time = new Date(departure_time);
+    if (price_per_seat) schedule.price_per_seat = parseFloat(price_per_seat);
+    if (total_seats) schedule.total_seats = parseInt(total_seats);
+
+    // Update bus if plate number provided
+    if (bus_plate_number) {
+      const bus = await Bus.findOne({ where: { plate_number: bus_plate_number, company_id: companyId } });
+      if (bus) {
+        schedule.bus_id = bus.id;
+      }
+    }
+
+    await schedule.save();
+
+    res.json({ message: 'Schedule updated successfully', schedule });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+const deleteSchedule = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const user = await User.findByPk(userId);
+    const companyId = user?.company_id;
+    
+    if (!companyId) {
+      return res.status(403).json({ error: 'No company associated with user' });
+    }
+
+    const scheduleId = req.params.id;
+    const schedule = await Schedule.findByPk(scheduleId);
+
+    if (!schedule || schedule.company_id !== companyId) {
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+
+    // Check if there are any bookings
+    const bookingCount = schedule.booked_seats || 0;
+    if (bookingCount > 0) {
+      return res.status(400).json({ error: 'Cannot delete schedule with existing bookings' });
+    }
+
+    await schedule.destroy();
+
+    res.json({ message: 'Schedule deleted successfully' });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
 const reopenScheduleTickets = async (req, res) => {
   try {
     const userId = req.userId;
@@ -579,6 +729,8 @@ module.exports = {
   assignBusDriver,
   getSchedules,
   createSchedule,
+  updateSchedule,
+  deleteSchedule,
   getTickets,
   getDrivers,
   createDriver,

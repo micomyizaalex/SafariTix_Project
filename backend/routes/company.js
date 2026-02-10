@@ -13,6 +13,8 @@ router.put('/buses/:id', auth, requireRoles(['company_admin','admin']), controll
 router.delete('/buses/:id', auth, requireRoles(['company_admin','admin']), controller.deleteBus);
 router.get('/schedules', auth, requireRoles(['company_admin','admin']), controller.getSchedules);
 router.post('/schedules', auth, requireRoles(['company_admin','admin']), controller.createSchedule);
+router.put('/schedules/:id', auth, requireRoles(['company_admin','admin']), controller.updateSchedule);
+router.delete('/schedules/:id', auth, requireRoles(['company_admin','admin']), controller.deleteSchedule);
 router.patch('/schedules/:id/reopen', auth, requireRoles(['company_admin','admin']), controller.reopenScheduleTickets);
 router.get('/schedules/:id/journals', auth, requireRoles(['company_admin','admin']), controller.getScheduleJournals);
 router.get('/tickets', auth, requireRoles(['company_admin','admin']), controller.getTickets);

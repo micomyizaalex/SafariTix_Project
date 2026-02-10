@@ -1,3 +1,9 @@
+const SAFARITIX = {
+  primary: '#0077B6',
+  primaryDark: '#005F8E',
+  primarySoft: '#E6F4FB',
+};
+
 import { useState, CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { Bus, AlertCircle, Eye, EyeOff, TrendingUp, MapPin, Users, Check, ArrowLeft } from 'lucide-react';
@@ -97,7 +103,7 @@ export function Login() {
     logoIcon: {
       width: '40px',
       height: '40px',
-      background: '#0077B6',
+      background: SAFARITIX.primary,
       borderRadius: '12px',
       display: 'flex',
       alignItems: 'center',
@@ -207,7 +213,7 @@ export function Login() {
       width: '16px',
       height: '16px',
       cursor: 'pointer',
-      accentColor: '#0077B6',
+      accentColor: SAFARITIX.primary,
     },
     rememberLabel: {
       fontSize: '14px',
@@ -215,14 +221,14 @@ export function Login() {
     },
     forgotLink: {
       fontSize: '14px',
-      color: '#0077B6',
+      color: SAFARITIX.primary,
       textDecoration: 'none',
       fontWeight: '500',
     },
     submitBtn: {
       width: '100%',
       padding: '14px',
-      background: '#0077B6',
+      background: SAFARITIX.primary,
       color: 'white',
       border: 'none',
       borderRadius: '12px',
@@ -238,14 +244,14 @@ export function Login() {
       color: '#6b7280',
     },
     link: {
-      color: '#0077B6',
+      color: SAFARITIX.primary,
       textDecoration: 'none',
       fontWeight: '500',
     },
     // Right Side - Info Panel
     rightSide: {
       flex: 1,
-      background: 'linear-gradient(135deg, #0077B6 0%, #0096c7 100%)',
+      background: `linear-gradient(135deg, ${SAFARITIX.primary} 0%, ${SAFARITIX.primaryDark} 100%)`,
       padding: '60px',
       color: 'white',
       display: 'flex',

@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 
-// SafariTix Bus Seat Map - Fixed for Tailwind v4
-// Top-down view with proper styling
+// SafariTix Dynamic Bus Seat Map
+// Renders EXACTLY the number of seats based on bus capacity
+// Layout: Driver (front-left) + Passenger (front-right) + Rows of 4 seats (2-2 with aisle)
 
 enum SeatStatus {
   AVAILABLE = "available",
@@ -11,89 +12,244 @@ enum SeatStatus {
 
 interface Seat {
   id: number;
+  seatNumber: string;
   status: SeatStatus;
-  passenger: string | null;
+  isDriver?: boolean;
 }
 
-interface BusSeatProps {
-  seat: Seat | undefined;
-  onClick: (id: number) => void;
+interface BusSeatMapProps {
+  capacity?: number; // Total bus capacity (default: 30)
+  bookedSeats?: number[]; // Array of pre-booked seat IDs
+  onSeatSelect?: (seat: Seat) => void;
 }
 
-interface PassengerLabelProps {
-  seat: Seat | undefined;
-  position: "left" | "right";
-}
-
-interface LegendItemProps {
-  color: string;
-  label: string;
-}
-
-const passengerNames: string[] = [
-  "John Doe",
-  "Jane Smith",
-  "Peter Brown",
-  "Mary Johnson",
-  "David Lee",
-  "Sarah Wilson",
-  "Michael Chen",
-];
-
-const seatsData: Seat[] = Array.from({ length: 44 }, (_, i) => {
-  const isBooked = i % 9 === 0;
-  return {
-    id: i + 1,
-    status: isBooked ? SeatStatus.BOOKED : SeatStatus.AVAILABLE,
-    passenger: isBooked
-      ? passengerNames[Math.floor(i / 9) % passengerNames.length]
-      : null,
+export default function BusSeatMap({ 
+  capacity = 30, 
+  bookedSeats = [1, 5, 12, 18],
+  onSeatSelect 
+}: BusSeatMapProps): JSX.Element {
+  
+  // Generate seats dynamically based on capacity
+  const generateSeats = (): Seat[] => {
+    const seats: Seat[] = [];
+    
+    // Seat 1: Driver (not selectable)
+    seats.push({
+      id: 1,
+      seatNumber: "DRIVER",
+      status: SeatStatus.BOOKED,
+      isDriver: true
+    });
+    
+    // Remaining seats for passengers
+    for (let i = 2; i <= capacity; i++) {
+      seats.push({
+        id: i,
+        seatNumber: `${i}`,
+        status: bookedSeats.includes(i) ? SeatStatus.BOOKED : SeatStatus.AVAILABLE,
+        isDriver: false
+      });
+    }
+    
+    return seats;
   };
-});
 
-export default function BusSeatMap(): JSX.Element {
-  const [seats, setSeats] = useState<Seat[]>(seatsData);
+  const [seats, setSeats] = useState<Seat[]>(generateSeats());
 
-  const toggleSeat = (id: number): void => {
+  const toggleSeat = (seat: Seat): void => {
+    if (seat.isDriver || seat.status === SeatStatus.BOOKED) return;
+    
     setSeats((prev) =>
-      prev.map((seat) => {
-        if (seat.id !== id || seat.status === SeatStatus.BOOKED) return seat;
-        return {
-          ...seat,
-          status:
-            seat.status === SeatStatus.SELECTED
-              ? SeatStatus.AVAILABLE
-              : SeatStatus.SELECTED,
-        };
+      prev.map((s) => {
+        if (s.id !== seat.id) return s;
+        const newStatus = s.status === SeatStatus.SELECTED 
+          ? SeatStatus.AVAILABLE 
+          : SeatStatus.SELECTED;
+        const updatedSeat = { ...s, status: newStatus };
+        
+        if (onSeatSelect && newStatus === SeatStatus.SELECTED) {
+          onSeatSelect(updatedSeat);
+        }
+        
+        return updatedSeat;
       })
     );
   };
 
-  const selectedSeats = seats.filter((s) => s.status === SeatStatus.SELECTED);
-  const totalPrice = selectedSeats.length * 3500;
-
-  const driverSeat = seats[0];
-  const passengerSeats = seats.slice(1);
-  const rows: (Seat | undefined)[][] = [];
-
-  for (let i = 0; i < passengerSeats.length; i += 4) {
-    rows.push(passengerSeats.slice(i, i + 4));
+  // Calculate layout: Front row (driver + 1 passenger) + remaining rows (4 seats per row: 2-2)
+  const driver = seats[0];
+  const frontPassenger = seats[1]; // Seat 2 next to driver
+  const remainingSeats = seats.slice(2); // Seats 3 onwards
+  const seatsPerRow = 4;
+  
+  // Organize remaining seats into rows of 4
+  const rows: Seat[][] = [];
+  for (let i = 0; i < remainingSeats.length; i += seatsPerRow) {
+    rows.push(remainingSeats.slice(i, i + seatsPerRow));
   }
+
+  const selectedSeats = seats.filter((s) => s.status === SeatStatus.SELECTED && !s.isDriver);
+  const totalPrice = selectedSeats.length * 3500;
 
   return (
     <div style={{
-      minHeight: "100vh",
-      background: "linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%)",
-      padding: "24px"
+      padding: "20px",
+      background: "#f9fafb",
+      borderRadius: "16px",
+      maxWidth: "900px",
+      margin: "0 auto"
     }}>
-      <div style={{ maxWidth: "1536px", margin: "0 auto" }}>
-        {/* Header */}
+      {/* Bus Container */}
+      <div style={{
+        background: "white",
+        borderRadius: "24px",
+        padding: "32px 24px",
+        boxShadow: "0 10px 40px rgba(0,0,0,0.08)"
+      }}>
+        {/* Capacity Info */}
         <div style={{
-          background: "linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)",
-          borderRadius: "24px 24px 0 0",
-          boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)",
-          padding: "32px",
-          marginBottom: "0"
+          textAlign: "center",
+          marginBottom: "24px",
+          paddingBottom: "16px",
+          borderBottom: "2px solid #e5e7eb"
+        }}>
+          <div style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            background: "#E8F7FF",
+            padding: "8px 16px",
+            borderRadius: "20px"
+          }}>
+            <span style={{ fontSize: "14px", fontWeight: "600", color: "#0077B6" }}>
+              🚌 Bus Capacity: {capacity} seats
+            </span>
+          </div>
+        </div>
+
+        {/* Bus Structure */}
+        <div style={{
+          position: "relative",
+          background: "linear-gradient(180deg, #f3f4f6 0%, #e5e7eb 100%)",
+          borderRadius: "80px 80px 24px 24px",
+          padding: "28px 20px",
+          border: "6px solid #d1d5db",
+          boxShadow: "inset 0 2px 8px rgba(0,0,0,0.05)"
+        }}>
+          {/* Windshield */}
+          <div style={{
+            position: "absolute",
+            top: "-2px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: "120px",
+            height: "70px",
+            background: "linear-gradient(180deg, #DBEAFE 0%, #BFDBFE 100%)",
+            borderRadius: "60px 60px 0 0",
+            border: "4px solid #d1d5db",
+            borderBottom: "none",
+            opacity: 0.7
+          }} />
+
+          {/* Front Row: Driver + Front Passenger */}
+          <div style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: "48px",
+            marginBottom: "32px",
+            marginTop: "48px"
+          }}>
+            {/* Driver Seat (Left) */}
+            <div style={{
+              width: "72px",
+              height: "64px",
+              background: "linear-gradient(135deg, #6b7280 0%, #4b5563 100%)",
+              border: "3px solid #374151",
+              borderRadius: "12px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              cursor: "not-allowed",
+              opacity: 0.8
+            }}>
+              <span style={{ fontSize: "20px", marginBottom: "2px" }}>🚗</span>
+              <span style={{ fontSize: "10px", fontWeight: "bold", color: "white" }}>DRIVER</span>
+            </div>
+
+            {/* Front Passenger Seat (Right) */}
+            {frontPassenger && (
+              <SeatComponent seat={frontPassenger} onClick={() => toggleSeat(frontPassenger)} />
+            )}
+          </div>
+
+          {/* Passenger Rows (2-aisle-2 configuration) */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {rows.map((row, rowIdx) => (
+              <div key={rowIdx} style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "12px"
+              }}>
+                {/* Left Side Seats */}
+                <div style={{ display: "flex", gap: "10px" }}>
+                  {row[0] && <SeatComponent seat={row[0]} onClick={() => toggleSeat(row[0])} />}
+                  {row[1] && <SeatComponent seat={row[1]} onClick={() => toggleSeat(row[1])} />}
+                </div>
+
+                {/* Aisle */}
+                <div style={{
+                  width: "40px",
+                  height: "2px",
+                  background: "linear-gradient(90deg, transparent 0%, #d1d5db 50%, transparent 100%)"
+                }} />
+
+                {/* Right Side Seats */}
+                <div style={{ display: "flex", gap: "10px" }}>
+                  {row[2] && <SeatComponent seat={row[2]} onClick={() => toggleSeat(row[2])} />}
+                  {row[3] && <SeatComponent seat={row[3]} onClick={() => toggleSeat(row[3])} />}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Bus Rear */}
+          <div style={{
+            marginTop: "24px",
+            height: "20px",
+            background: "linear-gradient(90deg, #9ca3af 0%, #6b7280 50%, #9ca3af 100%)",
+            borderRadius: "0 0 12px 12px",
+            boxShadow: "inset 0 -2px 4px rgba(0,0,0,0.2)"
+          }} />
+        </div>
+
+        {/* Legend */}
+        <div style={{
+          marginTop: "28px",
+          paddingTop: "20px",
+          borderTop: "1px solid #e5e7eb",
+          display: "flex",
+          justifyContent: "center",
+          gap: "32px",
+          flexWrap: "wrap"
+        }}>
+          <LegendItem color="#0077B6" label="Available" />
+          <LegendItem color="#005a8c" label="Selected" />
+          <LegendItem color="#9ca3af" label="Booked" />
+        </div>
+      </div>
+
+      {/* Booking Summary */}
+      {selectedSeats.length > 0 && (
+        <div style={{
+          marginTop: "20px",
+          background: "linear-gradient(135deg, #0077B6 0%, #0096D6 100%)",
+          borderRadius: "20px",
+          padding: "24px",
+          color: "white",
+          boxShadow: "0 10px 30px rgba(0,119,182,0.3)"
         }}>
           <div style={{
             display: "flex",
@@ -103,414 +259,121 @@ export default function BusSeatMap(): JSX.Element {
             gap: "16px"
           }}>
             <div>
-              <h1 style={{
-                fontSize: "3rem",
-                fontWeight: "bold",
-                color: "#1f2937",
-                marginBottom: "8px",
-                margin: "0"
-              }}>
-                BUS SEATING CHART
-              </h1>
-              <p style={{
-                fontSize: "1.125rem",
-                color: "#374151",
-                fontWeight: "600",
-                margin: "8px 0 0 0"
-              }}>
-                Kigali → Musanze • 08:30 AM Departure
+              <p style={{ fontSize: "13px", opacity: 0.9, margin: "0 0 6px 0" }}>
+                Selected Seats
+              </p>
+              <p style={{ fontSize: "24px", fontWeight: "700", margin: "0", fontFamily: "Montserrat, sans-serif" }}>
+                {selectedSeats.map((s) => s.seatNumber).join(", ")}
               </p>
             </div>
-            <div>
-              <div style={{
-                background: "rgba(255, 255, 255, 0.9)",
-                padding: "16px 32px",
-                borderRadius: "16px",
-                boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)"
-              }}>
-                <p style={{
-                  fontSize: "0.875rem",
-                  color: "#4b5563",
-                  margin: "0 0 4px 0"
-                }}>Price per seat</p>
-                <p style={{
-                  fontSize: "1.875rem",
-                  fontWeight: "bold",
-                  color: "#f59e0b",
-                  margin: "0"
-                }}>RWF 3,500</p>
-              </div>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ fontSize: "13px", opacity: 0.9, margin: "0 0 6px 0" }}>
+                Total Amount
+              </p>
+              <p style={{ fontSize: "32px", fontWeight: "700", margin: "0", fontFamily: "Montserrat, sans-serif" }}>
+                RWF {totalPrice.toLocaleString()}
+              </p>
             </div>
           </div>
-        </div>
-
-        {/* Main Bus Layout */}
-        <div style={{
-          background: "white",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-          borderRadius: "0 0 24px 24px",
-          padding: "40px"
-        }}>
-          <div style={{
-            display: "flex",
-            gap: "40px",
-            alignItems: "flex-start",
-            justifyContent: "center"
-          }}>
-            {/* Left Passenger List */}
-            <div style={{ width: "208px" }}>
-              <div style={{ height: "64px" }} />
-              {rows.map((row, idx) => (
-                <React.Fragment key={`left-${idx}`}>
-                  {row[0] && <PassengerLabel seat={row[0]} position="left" />}
-                  {row[1] && <PassengerLabel seat={row[1]} position="left" />}
-                </React.Fragment>
-              ))}
-            </div>
-
-            {/* Bus Structure */}
-            <div style={{ position: "relative" }}>
-              <div style={{
-                position: "relative",
-                background: "linear-gradient(180deg, #f9fafb 0%, #f3f4f6 100%)",
-                borderRadius: "140px 140px 40px 40px",
-                padding: "40px",
-                border: "10px solid #d1d5db",
-                boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)"
-              }}>
-                {/* Windshield */}
-                <div style={{
-                  position: "absolute",
-                  top: "0",
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  width: "160px",
-                  height: "112px",
-                  background: "linear-gradient(180deg, #bfdbfe 0%, #dbeafe 100%)",
-                  borderRadius: "120px 120px 0 0",
-                  border: "6px solid #d1d5db",
-                  marginTop: "-12px",
-                  overflow: "hidden"
-                }}>
-                  <div style={{
-                    position: "absolute",
-                    inset: "0",
-                    background: "linear-gradient(135deg, rgba(255,255,255,0.7) 0%, transparent 50%, transparent 100%)",
-                    borderRadius: "120px 120px 0 0"
-                  }} />
-                </div>
-
-                {/* Driver Seat */}
-                <div style={{
-                  display: "flex",
-                  justifyContent: "center",
-                  marginBottom: "40px",
-                  marginTop: "80px"
-                }}>
-                  <div style={{
-                    background: "linear-gradient(135deg, #f9a8d4 0%, #f472b6 100%)",
-                    border: "3px solid #ec4899",
-                    width: "128px",
-                    height: "56px",
-                    borderRadius: "16px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)"
-                  }}>
-                    <span style={{
-                      color: "white",
-                      fontWeight: "bold",
-                      fontSize: "0.75rem"
-                    }}>🚗 DRIVER</span>
-                  </div>
-                </div>
-
-                {/* Seat Grid */}
-                <div>
-                  {rows.map((row, rowIdx) => (
-                    <div key={rowIdx} style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "20px",
-                      marginBottom: "16px"
-                    }}>
-                      <div style={{ display: "flex", gap: "12px" }}>
-                        <BusSeat seat={row[0]} onClick={toggleSeat} />
-                        <BusSeat seat={row[1]} onClick={toggleSeat} />
-                      </div>
-                      <div style={{
-                        width: "64px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center"
-                      }}>
-                        <div style={{
-                          width: "2px",
-                          height: "48px",
-                          background: "linear-gradient(180deg, transparent 0%, #d1d5db 50%, transparent 100%)"
-                        }} />
-                      </div>
-                      <div style={{ display: "flex", gap: "12px" }}>
-                        <BusSeat seat={row[2]} onClick={toggleSeat} />
-                        <BusSeat seat={row[3]} onClick={toggleSeat} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Rear wheels */}
-                <Wheel style={{ bottom: "-28px", left: "40px" }} />
-                <Wheel style={{ bottom: "-28px", right: "40px" }} />
-              </div>
-
-              {/* Front wheels */}
-              <Wheel style={{ top: "112px", left: "-28px" }} size="small" />
-              <Wheel style={{ top: "112px", right: "-28px" }} size="small" />
-            </div>
-
-            {/* Right Passenger List */}
-            <div style={{ width: "208px" }}>
-              <div style={{ height: "64px" }} />
-              {rows.map((row, idx) => (
-                <React.Fragment key={`right-${idx}`}>
-                  {row[2] && <PassengerLabel seat={row[2]} position="right" />}
-                  {row[3] && <PassengerLabel seat={row[3]} position="right" />}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-
-          {/* Legend */}
-          <div style={{
-            marginTop: "64px",
-            paddingTop: "32px",
-            borderTop: "1px solid #e5e7eb"
-          }}>
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "48px"
-            }}>
-              <LegendItem color="#3b82f6" label="Available" />
-              <LegendItem color="#10b981" label="Selected" />
-              <LegendItem color="#eab308" label="Booked" />
-            </div>
-          </div>
-        </div>
-
-        {/* Booking Summary */}
-        {selectedSeats.length > 0 && (
-          <div style={{
-            marginTop: "32px",
-            background: "linear-gradient(90deg, #10b981 0%, #059669 100%)",
-            borderRadius: "24px",
-            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-            padding: "32px",
-            color: "white"
-          }}>
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-              gap: "24px"
-            }}>
-              <div>
-                <p style={{ fontSize: "0.875rem", opacity: 0.9, margin: "0 0 8px 0" }}>
-                  Selected Seats
-                </p>
-                <p style={{ fontSize: "1.875rem", fontWeight: "bold", margin: "0" }}>
-                  {selectedSeats.map((s) => s.id).join(", ")}
-                </p>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <p style={{ fontSize: "0.875rem", opacity: 0.9, margin: "0 0 8px 0" }}>
-                  Total Amount
-                </p>
-                <p style={{ fontSize: "2.25rem", fontWeight: "bold", margin: "0" }}>
-                  RWF {totalPrice.toLocaleString()}
-                </p>
-              </div>
-              <button style={{
-                background: "white",
-                color: "#059669",
-                padding: "16px 40px",
-                borderRadius: "16px",
-                fontWeight: "bold",
-                fontSize: "1.125rem",
-                border: "none",
-                cursor: "pointer",
-                boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)",
-                transition: "all 0.2s"
-              }}>
-                Book Now →
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function BusSeat({ seat, onClick }: BusSeatProps): JSX.Element {
-  if (!seat) return <div style={{ width: "56px", height: "56px" }} />;
-
-  const getStyles = () => {
-    const base = {
-      width: "56px",
-      height: "56px",
-      borderRadius: "12px",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      fontWeight: "bold" as const,
-      fontSize: "0.875rem",
-      transition: "all 0.2s",
-      cursor: "pointer",
-      position: "relative" as const,
-      border: "3px solid",
-      boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
-    };
-
-    if (seat.status === SeatStatus.AVAILABLE) {
-      return {
-        ...base,
-        background: "#3b82f6",
-        borderColor: "#1d4ed8",
-        color: "white",
-      };
-    } else if (seat.status === SeatStatus.SELECTED) {
-      return {
-        ...base,
-        background: "#10b981",
-        borderColor: "#047857",
-        color: "white",
-        transform: "scale(1.1)",
-        boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 0 0 4px rgba(16, 185, 129, 0.3)",
-      };
-    } else {
-      return {
-        ...base,
-        background: "#eab308",
-        borderColor: "#a16207",
-        color: "#1f2937",
-        cursor: "not-allowed",
-      };
-    }
-  };
-
-  return (
-    <div
-      onClick={() => seat.status !== SeatStatus.BOOKED && onClick(seat.id)}
-      style={getStyles()}
-      title={seat.passenger || `Seat ${seat.id}`}
-    >
-      <span style={{ position: "relative", zIndex: 10 }}>{seat.id}</span>
-      {seat.status === SeatStatus.SELECTED && (
-        <div style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "rgba(0,0,0,0.1)",
-          borderRadius: "12px"
-        }}>
-          <span style={{ fontSize: "1.5rem" }}>✓</span>
         </div>
       )}
     </div>
   );
 }
 
-function PassengerLabel({ seat, position }: PassengerLabelProps): JSX.Element {
-  if (!seat) return <div style={{ height: "56px" }} />;
-
-  const isBooked = seat.status === SeatStatus.BOOKED;
-  const isSelected = seat.status === SeatStatus.SELECTED;
-
-  return (
-    <div style={{
+// Individual Seat Component
+function SeatComponent({ seat, onClick }: { seat: Seat; onClick: () => void }): JSX.Element {
+  const getStyles = (): React.CSSProperties => {
+    const base: React.CSSProperties = {
+      width: "64px",
+      height: "56px",
+      borderRadius: "10px",
       display: "flex",
       alignItems: "center",
-      gap: "12px",
-      height: "56px",
-      ...(position === "right" ? { flexDirection: "row-reverse" as const, textAlign: "right" as const } : {})
-    }}>
-      <div style={{
-        width: "16px",
-        height: "16px",
-        borderRadius: "4px",
-        border: "2px solid",
-        background: isBooked ? "#eab308" : isSelected ? "#10b981" : "#3b82f6",
-        borderColor: isBooked ? "#a16207" : isSelected ? "#047857" : "#1d4ed8"
-      }} />
-      <div style={{ flex: 1 }}>
-        <p style={{
-          fontSize: "0.875rem",
-          fontWeight: "bold",
-          color: isBooked ? "#374151" : isSelected ? "#059669" : "#6b7280",
-          margin: "0 0 2px 0"
+      justifyContent: "center",
+      fontWeight: "700",
+      fontSize: "16px",
+      transition: "all 0.2s",
+      cursor: "pointer",
+      border: "3px solid",
+      boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
+      position: "relative"
+    };
+
+    if (seat.status === SeatStatus.AVAILABLE) {
+      return {
+        ...base,
+        background: "#0077B6",
+        borderColor: "#005a8c",
+        color: "white"
+      };
+    } else if (seat.status === SeatStatus.SELECTED) {
+      return {
+        ...base,
+        background: "#005a8c",
+        borderColor: "#003d5c",
+        color: "white",
+        transform: "scale(1.05)",
+        boxShadow: "0 6px 16px rgba(0,119,182,0.4), 0 0 0 4px rgba(0,119,182,0.2)"
+      };
+    } else {
+      return {
+        ...base,
+        background: "#9ca3af",
+        borderColor: "#6b7280",
+        color: "#4b5563",
+        cursor: "not-allowed",
+        opacity: 0.6
+      };
+    }
+  };
+
+  return (
+    <div
+      onClick={onClick}
+      style={getStyles()}
+      title={seat.status === SeatStatus.BOOKED ? "Seat Booked" : `Seat ${seat.seatNumber}`}
+    >
+      <span style={{ position: "relative", zIndex: 10 }}>{seat.seatNumber}</span>
+      {seat.status === SeatStatus.SELECTED && (
+        <div style={{
+          position: "absolute",
+          top: "-8px",
+          right: "-8px",
+          width: "20px",
+          height: "20px",
+          background: "#27AE60",
+          borderRadius: "50%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: "12px",
+          border: "2px solid white"
         }}>
-          {isBooked ? seat.passenger : isSelected ? "Your Seat" : "Available"}
-        </p>
-        <p style={{
-          fontSize: "0.75rem",
-          color: "#9ca3af",
-          fontWeight: "500",
-          margin: "0"
-        }}>
-          Seat {seat.id}
-        </p>
-      </div>
+          ✓
+        </div>
+      )}
     </div>
   );
 }
 
-function LegendItem({ color, label }: LegendItemProps): JSX.Element {
+// Legend Item
+function LegendItem({ color, label }: { color: string; label: string }): JSX.Element {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
       <div style={{
-        width: "40px",
-        height: "40px",
-        borderRadius: "12px",
+        width: "32px",
+        height: "32px",
+        borderRadius: "8px",
         background: color,
-        border: "3px solid #9ca3af",
-        boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)"
+        border: "2px solid #d1d5db",
+        boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
       }} />
       <span style={{
-        fontSize: "1rem",
-        fontWeight: "bold",
+        fontSize: "14px",
+        fontWeight: "600",
         color: "#374151"
       }}>{label}</span>
-    </div>
-  );
-}
-
-function Wheel({ style, size = "normal" }: { style: React.CSSProperties; size?: "normal" | "small" }): JSX.Element {
-  const wheelSize = size === "small" ? "48px" : "56px";
-  const innerInset = size === "small" ? "6px" : "8px";
-
-  return (
-    <div style={{
-      position: "absolute",
-      width: wheelSize,
-      height: wheelSize,
-      background: "linear-gradient(135deg, #1f2937 0%, #000000 100%)",
-      borderRadius: "50%",
-      boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
-      border: "5px solid #374151",
-      ...style
-    }}>
-      <div style={{
-        position: "absolute",
-        inset: innerInset,
-        borderRadius: "50%",
-        border: "2px solid #6b7280"
-      }} />
     </div>
   );
 }

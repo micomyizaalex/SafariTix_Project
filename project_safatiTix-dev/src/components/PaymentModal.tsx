@@ -1,11 +1,15 @@
-import { useState } from 'react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
+const SAFARITIX = {
+  primary: '#0077B6',
+  primaryDark: '#005F8E',
+  primarySoft: '#E6F4FB',
+};
+
+import { useState, CSSProperties } from 'react';
+import { Dialog, DialogContent } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Card, CardContent } from './ui/card';
-import { CreditCard, Check, Smartphone, Phone, Receipt, ArrowLeft, Loader2 } from 'lucide-react';
-import { Badge } from './ui/badge';
+import { CreditCard, Check, Smartphone, Phone, ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { API_URL } from '../utils/supabase-client';
 
@@ -63,7 +67,6 @@ export function PaymentModal({
     setError(null);
   };
 
-  // Step 1: Initiate payment
   const handleInitiatePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setProcessing(true);
@@ -95,13 +98,12 @@ export function PaymentModal({
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || data.error || 'Failed to initiate payment');
+        throw new Error(data.message || data.error || 'Payment failed');
       }
 
       setPaymentId(data.payment.id);
       setTransactionRef(data.payment.transaction_ref);
 
-      // Generate USSD code based on payment method
       const ussdCodes = {
         'mobile_money': '*182*1#',
         'airtel_money': '*185*1#',
@@ -109,25 +111,22 @@ export function PaymentModal({
       };
       setUssdCode(ussdCodes[paymentMethod] || '');
 
-      // Move to USSD step for mobile money, directly confirm for card
       if (paymentMethod === 'card_payment') {
-        // For card, skip USSD and go directly to confirmation
         await handleConfirmPayment(true);
       } else {
         setStep('ussd');
       }
 
     } catch (err: any) {
-      setError(err.message || 'Failed to initiate payment. Please try again.');
+      setError(err.message || 'Payment failed. Try again.');
     } finally {
       setProcessing(false);
     }
   };
 
-  // Step 2: Confirm payment (after USSD or Pay Anyway)
   const handleConfirmPayment = async (payAnyway: boolean = false) => {
     if (!paymentId) {
-      setError('Payment ID is missing');
+      setError('Payment ID missing');
       return;
     }
 
@@ -150,22 +149,20 @@ export function PaymentModal({
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || data.error || 'Failed to confirm payment');
+        throw new Error(data.message || data.error || 'Confirmation failed');
       }
 
-      // Step 3: Book ticket
       await handleBookTicket();
 
     } catch (err: any) {
-      setError(err.message || 'Failed to confirm payment. Please try again.');
+      setError(err.message || 'Confirmation failed. Try again.');
       setProcessing(false);
     }
   };
 
-  // Step 3: Book ticket after payment confirmation
   const handleBookTicket = async () => {
     if (!paymentId) {
-      setError('Payment ID is missing');
+      setError('Payment ID missing');
       setProcessing(false);
       return;
     }
@@ -186,21 +183,19 @@ export function PaymentModal({
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || data.error || 'Failed to book ticket');
+        throw new Error(data.message || data.error || 'Booking failed');
       }
 
-      // Success!
       setStep('success');
       setProcessing(false);
 
-      // Call success callback after showing success message
       setTimeout(() => {
         onSuccess();
         handleClose();
       }, 3000);
 
     } catch (err: any) {
-      setError(err.message || 'Failed to book ticket. Please try again.');
+      setError(err.message || 'Booking failed. Try again.');
       setProcessing(false);
     }
   };
@@ -220,172 +215,352 @@ export function PaymentModal({
     onClose();
   };
 
-  const getPaymentMethodName = (method: PaymentMethod) => {
-    const names = {
-      'mobile_money': 'MTN Mobile Money',
-      'airtel_money': 'Airtel Money',
-      'card_payment': 'Card Payment'
-    };
-    return names[method];
+  const styles: Record<string, CSSProperties> = {
+    // Amount Display
+    amountCard: {
+      background: `linear-gradient(135deg, ${SAFARITIX.primary} 0%, ${SAFARITIX.primaryDark} 100%)`,
+      borderRadius: '16px',
+      padding: '24px',
+      color: 'white',
+      marginBottom: '24px',
+      textAlign: 'center' as const,
+    },
+    amountLabel: {
+      fontSize: '14px',
+      opacity: 0.9,
+      marginBottom: '8px',
+    },
+    amountValue: {
+      fontSize: '42px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+      marginBottom: '4px',
+    },
+    ticketCount: {
+      fontSize: '14px',
+      opacity: 0.9,
+    },
+    // Payment Method Card
+    methodCard: {
+      background: 'var(--card)',
+      border: '2px solid var(--border)',
+      borderRadius: '16px',
+      padding: '16px',
+      marginBottom: '12px',
+      cursor: 'pointer',
+      transition: 'all 0.2s',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '16px',
+    },
+    methodIcon: {
+      width: '56px',
+      height: '56px',
+      borderRadius: '12px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    methodInfo: {
+      flex: 1,
+    },
+    methodTitle: {
+      fontSize: '16px',
+      fontWeight: '600',
+      marginBottom: '2px',
+      fontFamily: 'Montserrat, sans-serif',
+    },
+    methodDesc: {
+      fontSize: '13px',
+      color: 'var(--muted-foreground)',
+    },
+    // Error Alert
+    errorAlert: {
+      background: '#FEE2E2',
+      border: '1px solid #E63946',
+      color: '#991B1B',
+      padding: '12px 16px',
+      borderRadius: '12px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      marginBottom: '16px',
+      fontSize: '14px',
+    },
+    // USSD Display
+    ussdContainer: {
+      background: 'rgba(255, 255, 255, 0.15)',
+      backdropFilter: 'blur(10px)',
+      borderRadius: '12px',
+      padding: '20px',
+      marginTop: '16px',
+    },
+    ussdCode: {
+      background: 'rgba(255, 255, 255, 0.25)',
+      padding: '16px',
+      borderRadius: '12px',
+      fontFamily: 'monospace',
+      fontSize: '28px',
+      fontWeight: '700',
+      textAlign: 'center' as const,
+      marginBottom: '12px',
+      letterSpacing: '2px',
+    },
+    ussdInstructions: {
+      fontSize: '13px',
+      opacity: 0.95,
+      textAlign: 'center' as const,
+    },
+    // Success
+    successContainer: {
+      textAlign: 'center' as const,
+      padding: '40px 20px',
+    },
+    successIcon: {
+      width: '80px',
+      height: '80px',
+      borderRadius: '50%',
+      background: '#27AE60',
+      color: 'white',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      margin: '0 auto 24px',
+      animation: 'bounce 0.6s ease-in-out',
+    },
+    successTitle: {
+      fontSize: '28px',
+      fontWeight: '700',
+      color: '#27AE60',
+      marginBottom: '8px',
+      fontFamily: 'Montserrat, sans-serif',
+    },
+    successText: {
+      fontSize: '14px',
+      color: 'var(--muted-foreground)',
+      marginBottom: '24px',
+    },
+    // Details Card
+    detailsCard: {
+      background: '#F9FAFB',
+      borderRadius: '12px',
+      padding: '16px',
+      marginBottom: '16px',
+    },
+    detailRow: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '8px 0',
+      fontSize: '14px',
+    },
+    detailLabel: {
+      color: 'var(--muted-foreground)',
+    },
+    detailValue: {
+      fontWeight: '600',
+    },
   };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent style={{ maxWidth: '500px', padding: '24px' }}>
+        {/* STEP 1: Choose Method */}
         {step === 'method' && (
           <>
-            <DialogHeader>
-              <DialogTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>
+            <div style={{ marginBottom: '20px' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px', fontFamily: 'Montserrat, sans-serif' }}>
                 {title || 'Choose Payment Method'}
-              </DialogTitle>
-              <DialogDescription>
+              </h2>
+              <p style={{ fontSize: '14px', color: 'var(--muted-foreground)' }}>
                 {description || 'Select how you want to pay'}
-              </DialogDescription>
-            </DialogHeader>
-            
-            <div className="bg-gradient-to-r from-[#0077B6] to-[#005a8c] text-white p-6 rounded-lg mb-4">
-              <p className="text-sm opacity-90 mb-1">Total Amount</p>
-              <p className="text-4xl font-bold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                RWF {amount.toLocaleString()}
               </p>
+            </div>
+
+            <div style={styles.amountCard}>
+              <div style={styles.amountLabel}>Amount to Pay</div>
+              <div style={styles.amountValue}>RWF {amount.toLocaleString()}</div>
               {numTickets > 0 && (
-                <p className="text-sm opacity-90 mt-2">
+                <div style={styles.ticketCount}>
                   {numTickets} ticket{numTickets > 1 ? 's' : ''}
-                </p>
+                </div>
               )}
             </div>
 
-            <div className="space-y-3">
-              <Card 
-                className="cursor-pointer hover:border-[#0077B6] hover:shadow-md transition-all"
+            <div>
+              {/* MTN MoMo */}
+              <div
+                style={styles.methodCard}
                 onClick={() => handleMethodSelect('mobile_money')}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = SAFARITIX.primary;
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,119,182,0.15)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--border)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
               >
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-4">
-                    <div className="bg-yellow-400 text-black w-12 h-12 rounded-lg flex items-center justify-center">
-                      <Phone className="w-6 h-6" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                        MTN Mobile Money
-                      </h3>
-                      <p className="text-sm text-muted-foreground">Pay with MTN MoMo</p>
-                    </div>
-                    <Badge className="bg-[#27AE60]">Popular</Badge>
-                  </div>
-                </CardContent>
-              </Card>
+                <div style={{ ...styles.methodIcon, background: '#FFCB05', color: '#000' }}>
+                  <Phone style={{ width: '28px', height: '28px' }} />
+                </div>
+                <div style={styles.methodInfo}>
+                  <div style={styles.methodTitle}>MTN Mobile Money</div>
+                  <div style={styles.methodDesc}>Pay with MTN MoMo</div>
+                </div>
+                <div style={{
+                  background: '#27AE60',
+                  color: 'white',
+                  padding: '4px 10px',
+                  borderRadius: '20px',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                }}>
+                  Popular
+                </div>
+              </div>
 
-              <Card 
-                className="cursor-pointer hover:border-[#0077B6] hover:shadow-md transition-all"
+              {/* Airtel Money */}
+              <div
+                style={styles.methodCard}
                 onClick={() => handleMethodSelect('airtel_money')}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = SAFARITIX.primary;
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,119,182,0.15)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--border)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
               >
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-4">
-                    <div className="bg-red-600 text-white w-12 h-12 rounded-lg flex items-center justify-center">
-                      <Smartphone className="w-6 h-6" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                        Airtel Money
-                      </h3>
-                      <p className="text-sm text-muted-foreground">Pay with Airtel Money</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                <div style={{ ...styles.methodIcon, background: '#E63946', color: 'white' }}>
+                  <Smartphone style={{ width: '28px', height: '28px' }} />
+                </div>
+                <div style={styles.methodInfo}>
+                  <div style={styles.methodTitle}>Airtel Money</div>
+                  <div style={styles.methodDesc}>Pay with Airtel Money</div>
+                </div>
+              </div>
 
-              <Card 
-                className="cursor-pointer hover:border-[#0077B6] hover:shadow-md transition-all"
+              {/* Card Payment */}
+              <div
+                style={styles.methodCard}
                 onClick={() => handleMethodSelect('card_payment')}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = SAFARITIX.primary;
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,119,182,0.15)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--border)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
               >
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-4">
-                    <div className="bg-[#0077B6] text-white w-12 h-12 rounded-lg flex items-center justify-center">
-                      <CreditCard className="w-6 h-6" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                        Card Payment
-                      </h3>
-                      <p className="text-sm text-muted-foreground">Debit/Credit card</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                <div style={{ ...styles.methodIcon, background: SAFARITIX.primary, color: 'white' }}>
+                  <CreditCard style={{ width: '28px', height: '28px' }} />
+                </div>
+                <div style={styles.methodInfo}>
+                  <div style={styles.methodTitle}>Card Payment</div>
+                  <div style={styles.methodDesc}>Debit or Credit Card</div>
+                </div>
+              </div>
             </div>
           </>
         )}
 
+        {/* STEP 2: Enter Details (Mobile Money) */}
         {step === 'details' && paymentMethod !== 'card_payment' && (
           <>
-            <DialogHeader>
-              <DialogTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>
+            <div style={{ marginBottom: '20px' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px', fontFamily: 'Montserrat, sans-serif' }}>
                 {paymentMethod === 'mobile_money' ? 'MTN Mobile Money' : 'Airtel Money'}
-              </DialogTitle>
-              <DialogDescription>
-                Enter your phone number to complete payment
-              </DialogDescription>
-            </DialogHeader>
+              </h2>
+              <p style={{ fontSize: '14px', color: 'var(--muted-foreground)' }}>
+                Enter your phone number
+              </p>
+            </div>
 
             {error && (
-              <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md px-3 py-2 text-sm text-red-600">
-                {error}
+              <div style={styles.errorAlert}>
+                <AlertCircle style={{ width: '16px', height: '16px' }} />
+                <span>{error}</span>
               </div>
             )}
 
-            <div className="bg-[#F5F7FA] dark:bg-[#2B2D42] p-4 rounded-lg mb-4">
-              <div className="flex items-center gap-3 mb-3">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                  paymentMethod === 'mobile_money' ? 'bg-yellow-400 text-black' : 'bg-red-600 text-white'
-                }`}>
-                  {paymentMethod === 'mobile_money' ? <Phone className="w-5 h-5" /> : <Smartphone className="w-5 h-5" />}
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Amount to Pay</p>
-                  <p className="text-2xl font-bold text-[#0077B6]" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                    RWF {amount.toLocaleString()}
-                  </p>
+            <div style={{
+              ...styles.detailsCard,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px',
+              marginBottom: '20px',
+            }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '12px',
+                background: paymentMethod === 'mobile_money' ? '#FFCB05' : '#E63946',
+                color: paymentMethod === 'mobile_money' ? '#000' : 'white',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                {paymentMethod === 'mobile_money' ? 
+                  <Phone style={{ width: '24px', height: '24px' }} /> : 
+                  <Smartphone style={{ width: '24px', height: '24px' }} />
+                }
+              </div>
+              <div>
+                <div style={{ fontSize: '13px', color: 'var(--muted-foreground)' }}>Amount</div>
+                <div style={{ fontSize: '24px', fontWeight: '700', color: SAFARITIX.primary, fontFamily: 'Montserrat, sans-serif' }}>
+                  RWF {amount.toLocaleString()}
                 </div>
               </div>
             </div>
 
-            <form onSubmit={handleInitiatePayment} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone Number</Label>
+            <form onSubmit={handleInitiatePayment}>
+              <div style={{ marginBottom: '20px' }}>
+                <Label style={{ fontSize: '14px', fontWeight: '500', marginBottom: '8px', display: 'block' }}>
+                  Phone Number
+                </Label>
                 <Input
-                  id="phone"
                   type="tel"
                   placeholder="078XXXXXXX"
                   value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value)}
                   required
                   maxLength={10}
+                  style={{ fontSize: '16px', padding: '12px' }}
                 />
-                <p className="text-xs text-muted-foreground">
-                  You will receive a prompt on your phone to confirm payment
+                <p style={{ fontSize: '12px', color: 'var(--muted-foreground)', marginTop: '6px' }}>
+                  You'll get a prompt on your phone
                 </p>
               </div>
 
-              <div className="flex gap-2">
+              <div style={{ display: 'flex', gap: '8px' }}>
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setStep('method')}
-                  className="flex-1"
                   disabled={processing}
+                  style={{ flex: 1, padding: '12px' }}
                 >
-                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  <ArrowLeft style={{ width: '16px', height: '16px', marginRight: '8px' }} />
                   Back
                 </Button>
                 <Button
                   type="submit"
-                  className="flex-1 bg-[#0077B6] hover:bg-[#005a8c]"
                   disabled={processing}
+                  style={{
+                    flex: 1,
+                    background: SAFARITIX.primary,
+                    color: 'white',
+                    fontWeight: '600',
+                    padding: '12px',
+                  }}
                 >
                   {processing ? (
                     <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      <Loader2 style={{ width: '16px', height: '16px', marginRight: '8px' }} className="animate-spin" />
                       Processing...
                     </>
                   ) : (
@@ -397,35 +572,38 @@ export function PaymentModal({
           </>
         )}
 
+        {/* STEP 2: Enter Details (Card) */}
         {step === 'details' && paymentMethod === 'card_payment' && (
           <>
-            <DialogHeader>
-              <DialogTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>
+            <div style={{ marginBottom: '20px' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px', fontFamily: 'Montserrat, sans-serif' }}>
                 Card Payment
-              </DialogTitle>
-              <DialogDescription>
-                Enter your card details to complete payment
-              </DialogDescription>
-            </DialogHeader>
-
-            {error && (
-              <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md px-3 py-2 text-sm text-red-600">
-                {error}
-              </div>
-            )}
-
-            <div className="bg-gradient-to-r from-[#0077B6] to-[#005a8c] text-white p-4 rounded-lg mb-4">
-              <p className="text-sm opacity-90">Amount to Pay</p>
-              <p className="text-3xl font-bold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                RWF {amount.toLocaleString()}
+              </h2>
+              <p style={{ fontSize: '14px', color: 'var(--muted-foreground)' }}>
+                Enter your card details
               </p>
             </div>
 
-            <form onSubmit={handleInitiatePayment} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="cardName">Cardholder Name</Label>
+            {error && (
+              <div style={styles.errorAlert}>
+                <AlertCircle style={{ width: '16px', height: '16px' }} />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <div style={{ ...styles.amountCard, marginBottom: '20px', padding: '16px' }}>
+              <div style={{ fontSize: '13px', opacity: 0.9 }}>Amount</div>
+              <div style={{ fontSize: '32px', fontWeight: '700', fontFamily: 'Montserrat, sans-serif' }}>
+                RWF {amount.toLocaleString()}
+              </div>
+            </div>
+
+            <form onSubmit={handleInitiatePayment}>
+              <div style={{ marginBottom: '16px' }}>
+                <Label style={{ fontSize: '14px', fontWeight: '500', marginBottom: '6px', display: 'block' }}>
+                  Cardholder Name
+                </Label>
                 <Input
-                  id="cardName"
                   placeholder="John Doe"
                   value={cardName}
                   onChange={(e) => setCardName(e.target.value)}
@@ -433,10 +611,11 @@ export function PaymentModal({
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="cardNumber">Card Number</Label>
+              <div style={{ marginBottom: '16px' }}>
+                <Label style={{ fontSize: '14px', fontWeight: '500', marginBottom: '6px', display: 'block' }}>
+                  Card Number
+                </Label>
                 <Input
-                  id="cardNumber"
                   placeholder="1234 5678 9012 3456"
                   value={cardNumber}
                   onChange={(e) => setCardNumber(e.target.value)}
@@ -445,11 +624,12 @@ export function PaymentModal({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="expiry">Expiry Date</Label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
+                <div>
+                  <Label style={{ fontSize: '14px', fontWeight: '500', marginBottom: '6px', display: 'block' }}>
+                    Expiry
+                  </Label>
                   <Input
-                    id="expiry"
                     placeholder="MM/YY"
                     value={expiryDate}
                     onChange={(e) => setExpiryDate(e.target.value)}
@@ -457,10 +637,11 @@ export function PaymentModal({
                     required
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="cvv">CVV</Label>
+                <div>
+                  <Label style={{ fontSize: '14px', fontWeight: '500', marginBottom: '6px', display: 'block' }}>
+                    CVV
+                  </Label>
                   <Input
-                    id="cvv"
                     type="password"
                     placeholder="123"
                     value={cvv}
@@ -471,32 +652,34 @@ export function PaymentModal({
                 </div>
               </div>
 
-              <div className="flex gap-2">
+              <div style={{ display: 'flex', gap: '8px' }}>
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setStep('method')}
-                  className="flex-1"
                   disabled={processing}
+                  style={{ flex: 1 }}
                 >
-                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  <ArrowLeft style={{ width: '16px', height: '16px', marginRight: '8px' }} />
                   Back
                 </Button>
                 <Button
                   type="submit"
-                  className="flex-1 bg-[#0077B6] hover:bg-[#005a8c]"
                   disabled={processing}
+                  style={{
+                    flex: 1,
+                    background: SAFARITIX.primary,
+                    color: 'white',
+                    fontWeight: '600',
+                  }}
                 >
                   {processing ? (
                     <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      <Loader2 style={{ width: '16px', height: '16px', marginRight: '8px' }} className="animate-spin" />
                       Processing...
                     </>
                   ) : (
-                    <>
-                      <CreditCard className="w-4 h-4 mr-2" />
-                      Pay RWF {amount.toLocaleString()}
-                    </>
+                    `Pay RWF ${amount.toLocaleString()}`
                   )}
                 </Button>
               </div>
@@ -504,70 +687,76 @@ export function PaymentModal({
           </>
         )}
 
+        {/* STEP 3: USSD Confirmation */}
         {step === 'ussd' && (
           <>
-            <DialogHeader>
-              <DialogTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                Complete Payment via USSD
-              </DialogTitle>
-              <DialogDescription>
-                Follow the instructions below to complete your payment
-              </DialogDescription>
-            </DialogHeader>
+            <div style={{ marginBottom: '20px' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px', fontFamily: 'Montserrat, sans-serif' }}>
+                Complete Payment
+              </h2>
+              <p style={{ fontSize: '14px', color: 'var(--muted-foreground)' }}>
+                Follow instructions to confirm
+              </p>
+            </div>
 
             {error && (
-              <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md px-3 py-2 text-sm text-red-600 mb-4">
-                {error}
+              <div style={styles.errorAlert}>
+                <AlertCircle style={{ width: '16px', height: '16px' }} />
+                <span>{error}</span>
               </div>
             )}
 
-            <div className="bg-gradient-to-r from-[#0077B6] to-[#005a8c] text-white p-6 rounded-lg mb-4">
-              <p className="text-sm opacity-90 mb-2">Amount to Pay</p>
-              <p className="text-3xl font-bold mb-4" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                RWF {amount.toLocaleString()}
-              </p>
+            <div style={styles.amountCard}>
+              <div style={styles.amountLabel}>Amount to Pay</div>
+              <div style={styles.amountValue}>RWF {amount.toLocaleString()}</div>
               
-              <div className="bg-white/10 backdrop-blur-sm p-4 rounded-lg">
-                <p className="text-sm font-semibold mb-2">📱 USSD Instructions:</p>
-                <div className="bg-white/20 p-3 rounded font-mono text-lg text-center mb-2">
-                  Dial {ussdCode}
+              <div style={styles.ussdContainer}>
+                <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  📱 Dial this code:
                 </div>
-                <p className="text-xs opacity-90">
-                  Enter your PIN when prompted to confirm payment of RWF {amount.toLocaleString()}
-                </p>
+                <div style={styles.ussdCode}>{ussdCode}</div>
+                <div style={styles.ussdInstructions}>
+                  Enter your PIN when prompted
+                </div>
               </div>
             </div>
 
-            <Card className="bg-[#F5F7FA] dark:bg-[#2B2D42] border-0 mb-4">
-              <CardContent className="p-4">
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Transaction Ref:</span>
-                    <span className="font-mono text-xs">{transactionRef}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Payment Method:</span>
-                    <span>{getPaymentMethodName(paymentMethod)}</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <div style={styles.detailsCard}>
+              <div style={styles.detailRow}>
+                <span style={styles.detailLabel}>Transaction Ref</span>
+                <span style={{ ...styles.detailValue, fontFamily: 'monospace', fontSize: '12px' }}>
+                  {transactionRef}
+                </span>
+              </div>
+              <div style={styles.detailRow}>
+                <span style={styles.detailLabel}>Method</span>
+                <span style={styles.detailValue}>
+                  {paymentMethod === 'mobile_money' ? 'MTN MoMo' : 'Airtel Money'}
+                </span>
+              </div>
+            </div>
 
-            <div className="space-y-2">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <Button
                 onClick={() => handleConfirmPayment(false)}
-                className="w-full bg-[#27AE60] hover:bg-[#1e8c4d]"
                 disabled={processing}
+                style={{
+                  width: '100%',
+                  background: '#27AE60',
+                  color: 'white',
+                  fontWeight: '600',
+                  padding: '14px',
+                }}
               >
                 {processing ? (
                   <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Processing...
+                    <Loader2 style={{ width: '16px', height: '16px', marginRight: '8px' }} className="animate-spin" />
+                    Confirming...
                   </>
                 ) : (
                   <>
-                    <Check className="w-4 h-4 mr-2" />
-                    Confirm Payment
+                    <Check style={{ width: '16px', height: '16px', marginRight: '8px' }} />
+                    I've Paid - Confirm
                   </>
                 )}
               </Button>
@@ -575,8 +764,8 @@ export function PaymentModal({
               <Button
                 onClick={() => handleConfirmPayment(true)}
                 variant="outline"
-                className="w-full"
                 disabled={processing}
+                style={{ width: '100%', padding: '14px' }}
               >
                 Pay Anyway
               </Button>
@@ -584,98 +773,76 @@ export function PaymentModal({
           </>
         )}
 
+        {/* STEP 4: Success */}
         {step === 'success' && (
-          <div className="text-center py-8">
-            <div className="bg-[#27AE60] text-white w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
-              <Check className="w-10 h-10" />
+          <div style={styles.successContainer}>
+            <div style={styles.successIcon}>
+              <Check style={{ width: '40px', height: '40px' }} />
             </div>
-            <h3 className="text-3xl font-bold mb-3 text-[#27AE60]" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-              Ticket booked successfully 🎉
-            </h3>
-            <p className="text-muted-foreground mb-6">
-              Your payment has been confirmed and tickets have been booked
+            <h3 style={styles.successTitle}>Payment Success! 🎉</h3>
+            <p style={styles.successText}>
+              Your ticket has been booked
             </p>
 
-            <Card className="bg-[#F5F7FA] dark:bg-[#2B2D42] border-0">
-              <CardContent className="p-6 space-y-4">
-                <div className="flex items-center justify-center gap-2 mb-4">
-                  <Receipt className="w-5 h-5 text-[#0077B6]" />
-                  <h4 className="font-semibold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                    Payment Confirmation
-                  </h4>
+            <div style={styles.detailsCard}>
+              <div style={styles.detailRow}>
+                <span style={styles.detailLabel}>Paid</span>
+                <span style={{ ...styles.detailValue, color: '#27AE60', fontSize: '16px' }}>
+                  RWF {amount.toLocaleString()}
+                </span>
+              </div>
+              {transactionRef && (
+                <div style={styles.detailRow}>
+                  <span style={styles.detailLabel}>Ref</span>
+                  <span style={{ ...styles.detailValue, fontFamily: 'monospace', fontSize: '12px' }}>
+                    {transactionRef}
+                  </span>
                 </div>
-
-                <div className="space-y-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Amount Paid:</span>
-                    <span className="font-bold text-[#27AE60]">RWF {amount.toLocaleString()}</span>
-                  </div>
-                  
-                  {transactionRef && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Transaction Ref:</span>
-                      <span className="font-mono text-xs">{transactionRef}</span>
-                    </div>
-                  )}
-
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Payment Method:</span>
-                    <span>{getPaymentMethodName(paymentMethod)}</span>
-                  </div>
-
-                  {busDetails && (
-                    <>
-                      <div className="border-t border-border pt-3 mt-3">
-                        <p className="text-xs text-muted-foreground mb-2">Bus Details</p>
-                      </div>
-                      
-                      {busDetails.company && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Company:</span>
-                          <span className="font-semibold">{busDetails.company}</span>
-                        </div>
-                      )}
-
-                      {busDetails.route && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Route:</span>
-                          <span className="font-semibold">{busDetails.route}</span>
-                        </div>
-                      )}
-
-                      {busDetails.date && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Date:</span>
-                          <span>{busDetails.date}</span>
-                        </div>
-                      )}
-
-                      {busDetails.time && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Time:</span>
-                          <span>{busDetails.time}</span>
-                        </div>
-                      )}
-
-                      {numTickets > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Tickets:</span>
-                          <span>{numTickets}</span>
-                        </div>
-                      )}
-                    </>
-                  )}
+              )}
+              {busDetails?.route && (
+                <div style={styles.detailRow}>
+                  <span style={styles.detailLabel}>Route</span>
+                  <span style={styles.detailValue}>{busDetails.route}</span>
                 </div>
-
-                <div className="bg-white dark:bg-[#1a1a1a] p-3 rounded text-xs text-muted-foreground mt-4">
-                  <p>✓ Payment confirmed</p>
-                  <p>✓ Tickets booked successfully</p>
-                  <p>✓ Redirecting to My Tickets...</p>
+              )}
+              {busDetails?.date && (
+                <div style={styles.detailRow}>
+                  <span style={styles.detailLabel}>Date</span>
+                  <span style={styles.detailValue}>{busDetails.date}</span>
                 </div>
-              </CardContent>
-            </Card>
+              )}
+              {busDetails?.time && (
+                <div style={styles.detailRow}>
+                  <span style={styles.detailLabel}>Time</span>
+                  <span style={styles.detailValue}>{busDetails.time}</span>
+                </div>
+              )}
+            </div>
+
+            <div style={{
+              background: '#DCFCE7',
+              border: '1px solid #27AE60',
+              borderRadius: '8px',
+              padding: '12px',
+              fontSize: '13px',
+              color: '#166534',
+              marginTop: '16px',
+            }}>
+              ✓ Payment confirmed<br />
+              ✓ Ticket booked<br />
+              ✓ Redirecting...
+            </div>
           </div>
         )}
+
+        <style>
+          {`
+            @keyframes bounce {
+              0%, 100% { transform: scale(1); }
+              50% { transform: scale(1.1); }
+            }
+          `}
+        </style>
       </DialogContent>
     </Dialog>
   );

@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Alert, AlertDescription } from './ui/alert';
 import { Bus, MapPin, QrCode, LogOut, CheckCircle, XCircle, AlertCircle, Navigation, Camera, Keyboard, Settings } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { useNavigate } from 'react-router-dom';
 
 type Bus = {
   id: number;
@@ -38,6 +39,7 @@ type RecentScan = {
 export function DriverDashboard() {
   const { user, accessToken, loading, signOut } = useAuth();
   const token = accessToken || localStorage.getItem('token');
+  const navigate = useNavigate();
 
   const [buses, setBuses] = useState<Bus[]>([]);
   const [selectedBusId, setSelectedBusId] = useState<number | null>(null);
@@ -327,6 +329,15 @@ export function DriverDashboard() {
           </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => navigate('/driver/dashboard/tracking')}
+              style={{ background: '#0077B6', color: 'white', borderColor: '#0077B6' }}
+            >
+              <Navigation className="w-4 h-4 mr-2" />
+              Start Tracking
+            </Button>
             <Button variant="outline" size="sm" onClick={signOut}>
               <LogOut className="w-4 h-4 mr-2" />
               Logout

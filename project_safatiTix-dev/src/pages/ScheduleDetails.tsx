@@ -1,12 +1,17 @@
-import React, { useEffect, useState } from 'react';
+const SAFARITIX = {
+  primary: '#0077B6',
+  primaryDark: '#005F8E',
+  primarySoft: '#E6F4FB',
+};
+
+import React, { useEffect, useState, CSSProperties } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../components/AuthContext';
 import { API_URL } from '../utils/supabase-client';
 import SeatMap from '../components/SeatMap';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { ArrowLeft, Bus, Calendar, Clock, MapPin, DollarSign, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Bus, Calendar, Clock, MapPin, DollarSign, AlertCircle, CheckCircle } from 'lucide-react';
 
 export default function ScheduleDetails() {
   const { id } = useParams();
@@ -20,7 +25,6 @@ export default function ScheduleDetails() {
 
   useEffect(() => {
     if (!user) {
-      // Redirect to login if not authenticated
       navigate('/login', { state: { from: `/schedules/${id}` } });
       return;
     }
@@ -54,7 +58,6 @@ export default function ScheduleDetails() {
     setError(null);
 
     try {
-      // Initiate payment
       const init = await fetch(`${API_URL}/payments/initiate`, {
         method: 'POST',
         headers: {
@@ -75,7 +78,6 @@ export default function ScheduleDetails() {
       }
       const initBody = await init.json();
 
-      // Simulate immediate confirmation for demo (call confirm)
       const confirm = await fetch(`${API_URL}/payments/confirm`, {
         method: 'POST',
         headers: {
@@ -89,7 +91,6 @@ export default function ScheduleDetails() {
         throw new Error('Payment confirmation failed');
       }
 
-      // Finalize lock -> confirm ticket
       const res = await fetch(`${API_URL}/seats/locks/${lockInfo.lock_id}/confirm`, {
         method: 'POST',
         headers: {
@@ -112,208 +113,521 @@ export default function ScheduleDetails() {
     }
   };
 
+  const styles: Record<string, CSSProperties> = {
+    container: {
+      minHeight: '100vh',
+      background: `linear-gradient(135deg, ${SAFARITIX.primary} 0%, ${SAFARITIX.primaryDark} 100%)`,
+      position: 'relative' as const,
+    },
+    blob1: {
+      position: 'absolute' as const,
+      top: '-10%',
+      right: '-5%',
+      width: '500px',
+      height: '500px',
+      background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%)',
+      borderRadius: '50%',
+      filter: 'blur(60px)',
+      zIndex: 0,
+    },
+    blob2: {
+      position: 'absolute' as const,
+      bottom: '-10%',
+      left: '-5%',
+      width: '400px',
+      height: '400px',
+      background: 'radial-gradient(circle, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 70%)',
+      borderRadius: '50%',
+      filter: 'blur(50px)',
+      zIndex: 0,
+    },
+    header: {
+      padding: '20px 16px',
+      position: 'relative' as const,
+      zIndex: 10,
+    },
+    headerContent: {
+      maxWidth: '1200px',
+      margin: '0 auto',
+    },
+    backButton: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '10px 16px',
+      background: 'rgba(255,255,255,0.15)',
+      backdropFilter: 'blur(10px)',
+      border: '1px solid rgba(255,255,255,0.2)',
+      borderRadius: '12px',
+      color: 'white',
+      cursor: 'pointer',
+      transition: 'all 0.3s',
+      marginBottom: '24px',
+      fontSize: '14px',
+      fontWeight: '500',
+    },
+    pageTitle: {
+      fontSize: '32px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+      color: 'white',
+      marginBottom: '8px',
+    },
+    pageSubtitle: {
+      fontSize: '16px',
+      color: 'rgba(255,255,255,0.9)',
+    },
+    content: {
+      maxWidth: '1200px',
+      margin: '0 auto',
+      padding: '0 16px 24px',
+      position: 'relative' as const,
+      zIndex: 10,
+    },
+    // Trip Details Card
+    tripCard: {
+      background: 'white',
+      borderRadius: '24px',
+      padding: '28px',
+      marginBottom: '20px',
+      boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+      borderLeft: `6px solid ${SAFARITIX.primary}`,
+    },
+    cardTitle: {
+      fontSize: '20px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+      color: '#1a1a1a',
+      marginBottom: '24px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+    },
+    detailsGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+      gap: '20px',
+      marginBottom: '24px',
+    },
+    detailItem: {
+      display: 'flex',
+      flexDirection: 'column' as const,
+      gap: '8px',
+    },
+    detailLabel: {
+      fontSize: '13px',
+      color: '#6b7280',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+    },
+    detailValue: {
+      fontSize: '18px',
+      fontWeight: '600',
+      color: '#1a1a1a',
+    },
+    priceValue: {
+      fontSize: '28px',
+      fontWeight: '700',
+      color: SAFARITIX.primary,
+      fontFamily: 'Montserrat, sans-serif',
+    },
+    infoGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+      gap: '16px',
+      paddingTop: '20px',
+      borderTop: '1px solid #e5e7eb',
+    },
+    infoItem: {
+      display: 'flex',
+      flexDirection: 'column' as const,
+      gap: '4px',
+    },
+    infoLabel: {
+      fontSize: '12px',
+      color: '#6b7280',
+    },
+    infoValue: {
+      fontSize: '16px',
+      fontWeight: '600',
+      color: '#1a1a1a',
+    },
+    // Seat Map Card
+    seatCard: {
+      background: 'white',
+      borderRadius: '24px',
+      padding: '28px',
+      marginBottom: '20px',
+      boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+    },
+    seatCardTitle: {
+      fontSize: '20px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+      color: '#1a1a1a',
+      marginBottom: '8px',
+    },
+    seatCardDesc: {
+      fontSize: '14px',
+      color: '#6b7280',
+      marginBottom: '24px',
+    },
+    // Payment Sticky Bar
+    paymentBar: {
+      position: 'sticky' as const,
+      bottom: '16px',
+      background: 'white',
+      borderRadius: '20px',
+      padding: '24px',
+      boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+      border: '3px solid #27AE60',
+      zIndex: 50,
+    },
+    paymentContent: {
+      display: 'flex',
+      flexDirection: 'row' as const,
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: '20px',
+      flexWrap: 'wrap' as const,
+    },
+    paymentInfo: {
+      flex: 1,
+      minWidth: '200px',
+    },
+    paymentTitle: {
+      fontSize: '20px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+      color: '#1a1a1a',
+      marginBottom: '4px',
+    },
+    paymentDesc: {
+      fontSize: '13px',
+      color: '#6b7280',
+    },
+    paymentRight: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '20px',
+      flexWrap: 'wrap' as const,
+    },
+    priceBox: {
+      textAlign: 'center' as const,
+    },
+    priceLabel: {
+      fontSize: '12px',
+      color: '#6b7280',
+      marginBottom: '4px',
+    },
+    priceAmount: {
+      fontSize: '32px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+      color: '#27AE60',
+    },
+    payButton: {
+      padding: '16px 32px',
+      background: 'linear-gradient(135deg, #27AE60 0%, #1e8c4d 100%)',
+      color: 'white',
+      border: 'none',
+      borderRadius: '16px',
+      fontSize: '16px',
+      fontWeight: '600',
+      cursor: 'pointer',
+      transition: 'all 0.3s',
+      boxShadow: '0 8px 24px rgba(39,174,96,0.3)',
+      whiteSpace: 'nowrap' as const,
+    },
+    // Error/Empty States
+    centerCard: {
+      maxWidth: '500px',
+      margin: '100px auto',
+      background: 'white',
+      borderRadius: '24px',
+      padding: '48px 32px',
+      boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+      textAlign: 'center' as const,
+      position: 'relative' as const,
+      zIndex: 10,
+    },
+    errorIcon: {
+      width: '64px',
+      height: '64px',
+      margin: '0 auto 20px',
+    },
+    centerTitle: {
+      fontSize: '24px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+      marginBottom: '12px',
+      color: '#1a1a1a',
+    },
+    centerText: {
+      fontSize: '14px',
+      color: '#6b7280',
+      marginBottom: '28px',
+      lineHeight: '1.6',
+    },
+    loadingSpinner: {
+      width: '60px',
+      height: '60px',
+      border: '4px solid rgba(255,255,255,0.2)',
+      borderTopColor: 'white',
+      borderRadius: '50%',
+      margin: '0 auto 24px',
+      animation: 'spin 1s linear infinite',
+    },
+  };
+
   if (error) {
     return (
-      <div className="min-h-screen bg-background p-4 flex items-center justify-center">
-        <Card className="max-w-md w-full">
-          <CardContent className="p-6 text-center space-y-4">
-            <AlertCircle className="w-12 h-12 text-red-500 mx-auto" />
-            <h2 className="text-xl font-semibold text-red-600">Error</h2>
-            <p className="text-muted-foreground">{error}</p>
-            <Button onClick={() => navigate('/dashboard/commuter')}>
-              <ArrowLeft className="w-4 h-4 mr-2" />
+      <div style={styles.container}>
+        <div style={styles.blob1} />
+        <div style={styles.blob2} />
+        <div style={{ ...styles.content, paddingTop: '40px' }}>
+          <div style={styles.centerCard}>
+            <AlertCircle style={{ ...styles.errorIcon, color: '#dc2626' }} />
+            <h2 style={{ ...styles.centerTitle, color: '#dc2626' }}>Error</h2>
+            <p style={styles.centerText}>{error}</p>
+            <button
+              onClick={() => navigate('/dashboard/commuter')}
+              style={{
+                ...styles.backButton,
+                background: SAFARITIX.primary,
+                color: 'white',
+                border: 'none',
+                margin: '0 auto',
+              }}
+            >
+              <ArrowLeft style={{ width: '16px', height: '16px' }} />
               Back to Dashboard
-            </Button>
-          </CardContent>
-        </Card>
+            </button>
+          </div>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
   if (!schedule) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <div className="animate-spin h-12 w-12 border-4 border-[#0077B6] border-t-transparent rounded-full mx-auto"></div>
-          <p className="text-muted-foreground">Loading schedule...</p>
+      <div style={styles.container}>
+        <div style={styles.blob1} />
+        <div style={styles.blob2} />
+        <div style={{ ...styles.content, paddingTop: '40px' }}>
+          <div style={styles.centerCard}>
+            <div style={styles.loadingSpinner} />
+            <p style={{ color: '#6b7280', fontSize: '16px' }}>Loading schedule...</p>
+          </div>
         </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
   if (!schedule.bookable) {
     return (
-      <div className="min-h-screen bg-background p-4 flex items-center justify-center">
-        <Card className="max-w-md w-full">
-          <CardContent className="p-6 text-center space-y-4">
-            <AlertCircle className="w-12 h-12 text-orange-500 mx-auto" />
-            <h2 className="text-xl font-semibold">Booking Unavailable</h2>
-            <p className="text-muted-foreground">
+      <div style={styles.container}>
+        <div style={styles.blob1} />
+        <div style={styles.blob2} />
+        <div style={{ ...styles.content, paddingTop: '40px' }}>
+          <div style={styles.centerCard}>
+            <AlertCircle style={{ ...styles.errorIcon, color: '#f59e0b' }} />
+            <h2 style={styles.centerTitle}>Booking Unavailable</h2>
+            <p style={styles.centerText}>
               This trip is no longer available for booking. It may have departed or ticket sales have closed.
             </p>
-            <Button onClick={() => navigate('/dashboard/commuter')}>
-              <ArrowLeft className="w-4 h-4 mr-2" />
+            <button
+              onClick={() => navigate('/dashboard/commuter')}
+              style={{
+                ...styles.backButton,
+                background: SAFARITIX.primary,
+                color: 'white',
+                border: 'none',
+                margin: '0 auto',
+              }}
+            >
+              <ArrowLeft style={{ width: '16px', height: '16px' }} />
               Back to Dashboard
-            </Button>
-          </CardContent>
-        </Card>
+            </button>
+          </div>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <Button
-            variant="ghost"
-            onClick={() => navigate('/dashboard/commuter')}
-            className="mb-4"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Search
-          </Button>
+    <div style={styles.container}>
+      {/* Background Blobs */}
+      <div style={styles.blob1} />
+      <div style={styles.blob2} />
 
-          <div className="flex items-start gap-4">
-            <div className="flex-1">
-              <h1 className="text-2xl md:text-3xl font-bold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                Select Your Seat
-              </h1>
-              <p className="text-muted-foreground mt-1">
-                Choose an available seat for your journey
-              </p>
-            </div>
-          </div>
+      {/* Header */}
+      <div style={styles.header}>
+        <div style={styles.headerContent}>
+          <button
+            onClick={() => navigate('/dashboard/commuter')}
+            style={styles.backButton}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.25)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
+          >
+            <ArrowLeft style={{ width: '16px', height: '16px' }} />
+            Back to Search
+          </button>
+          <h1 style={styles.pageTitle}>Select Your Seat</h1>
+          <p style={styles.pageSubtitle}>Choose an available seat for your journey</p>
         </div>
       </div>
 
-      {/* Schedule Details */}
-      <div className="container mx-auto px-4 py-6 space-y-6">
-        <Card className="border-l-4 border-l-[#0077B6]">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Bus className="w-5 h-5 text-[#0077B6]" />
-              Trip Details
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="space-y-1">
-                <p className="text-sm text-muted-foreground flex items-center gap-2">
-                  <MapPin className="w-4 h-4" />
-                  Route
-                </p>
-                <p className="font-semibold text-lg">
-                  {schedule.routeFrom} → {schedule.routeTo}
-                </p>
-              </div>
+      {/* Content */}
+      <div style={styles.content}>
+        {/* Trip Details Card */}
+        <div style={styles.tripCard}>
+          <div style={styles.cardTitle}>
+            <Bus style={{ width: '24px', height: '24px', color: SAFARITIX.primary }} />
+            Trip Details
+          </div>
 
-              <div className="space-y-1">
-                <p className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Calendar className="w-4 h-4" />
-                  Departure
-                </p>
-                <p className="font-semibold">
-                  {new Date(schedule.departureTime).toLocaleDateString('en-US', {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric'
-                  })}
-                </p>
+          <div style={styles.detailsGrid}>
+            <div style={styles.detailItem}>
+              <div style={styles.detailLabel}>
+                <MapPin style={{ width: '16px', height: '16px' }} />
+                Route
               </div>
-
-              <div className="space-y-1">
-                <p className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Clock className="w-4 h-4" />
-                  Time
-                </p>
-                <p className="font-semibold">
-                  {new Date(schedule.departureTime).toLocaleTimeString('en-US', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <p className="text-sm text-muted-foreground flex items-center gap-2">
-                  <DollarSign className="w-4 h-4" />
-                  Price
-                </p>
-                <p className="font-semibold text-[#0077B6] text-xl">
-                  RWF {schedule.price.toLocaleString()}
-                </p>
+              <div style={styles.detailValue}>
+                {schedule.routeFrom} → {schedule.routeTo}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 pt-4 border-t">
-              <div>
-                <p className="text-sm text-muted-foreground">Bus</p>
-                <p className="font-semibold font-mono">{schedule.busPlate || 'N/A'}</p>
+            <div style={styles.detailItem}>
+              <div style={styles.detailLabel}>
+                <Calendar style={{ width: '16px', height: '16px' }} />
+                Departure
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Capacity</p>
-                <p className="font-semibold">{schedule.busCapacity || 'N/A'} seats</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Available</p>
-                <Badge variant={schedule.availableSeats > 5 ? 'default' : 'destructive'}>
-                  {schedule.availableSeats} seats left
-                </Badge>
+              <div style={styles.detailValue}>
+                {new Date(schedule.departureTime).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric'
+                })}
               </div>
             </div>
-          </CardContent>
-        </Card>
 
-        {/* Seat Map */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Select Your Seat</CardTitle>
-            <CardDescription>
-              Tap an available seat to reserve it. You have 7 minutes to complete payment.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <SeatMap scheduleId={schedule.id} onSelect={onSeatSelect} />
-          </CardContent>
-        </Card>
+            <div style={styles.detailItem}>
+              <div style={styles.detailLabel}>
+                <Clock style={{ width: '16px', height: '16px' }} />
+                Time
+              </div>
+              <div style={styles.detailValue}>
+                {new Date(schedule.departureTime).toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </div>
+            </div>
 
-        {/* Payment Section */}
+            <div style={styles.detailItem}>
+              <div style={styles.detailLabel}>
+                <DollarSign style={{ width: '16px', height: '16px' }} />
+                Price
+              </div>
+              <div style={styles.priceValue}>
+                RWF {schedule.price.toLocaleString()}
+              </div>
+            </div>
+          </div>
+
+          <div style={styles.infoGrid}>
+            <div style={styles.infoItem}>
+              <div style={styles.infoLabel}>Bus</div>
+              <div style={{ ...styles.infoValue, fontFamily: 'monospace' }}>
+                {schedule.busPlate || 'N/A'}
+              </div>
+            </div>
+            <div style={styles.infoItem}>
+              <div style={styles.infoLabel}>Capacity</div>
+              <div style={styles.infoValue}>
+                {schedule.busCapacity || 'N/A'} seats
+              </div>
+            </div>
+            <div style={styles.infoItem}>
+              <div style={styles.infoLabel}>Available</div>
+              <Badge style={{
+                background: schedule.availableSeats > 5 ? '#27AE60' : '#f59e0b',
+                color: 'white',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '13px',
+                fontWeight: '600',
+              }}>
+                {schedule.availableSeats} seats left
+              </Badge>
+            </div>
+          </div>
+        </div>
+
+        {/* Seat Map Card */}
+        <div style={styles.seatCard}>
+          <div style={styles.seatCardTitle}>Select Your Seat</div>
+          <div style={styles.seatCardDesc}>
+            Tap an available seat to reserve it. You have 7 minutes to complete payment.
+          </div>
+          <SeatMap scheduleId={schedule.id} onSelect={onSeatSelect} />
+        </div>
+
+        {/* Payment Bar */}
         {selectedSeat && lockInfo && (
-          <Card className="border-2 border-[#27AE60] sticky bottom-4">
-            <CardContent className="p-6">
-              <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="flex-1 text-center md:text-left">
-                  <h3 className="font-semibold text-lg mb-1">
-                    Seat {selectedSeat.seat_number} Selected
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    Your seat is reserved. Complete payment to confirm your booking.
-                  </p>
+          <div style={styles.paymentBar}>
+            <div style={styles.paymentContent}>
+              <div style={styles.paymentInfo}>
+                <div style={styles.paymentTitle}>
+                  <CheckCircle style={{ width: '20px', height: '20px', color: '#27AE60', display: 'inline', marginRight: '8px' }} />
+                  Seat {selectedSeat.seat_number} Reserved
                 </div>
-                <div className="flex flex-col sm:flex-row items-center gap-4">
-                  <div className="text-center">
-                    <p className="text-sm text-muted-foreground">Total Amount</p>
-                    <p className="text-2xl font-bold text-[#27AE60]">
-                      RWF {schedule.price.toLocaleString()}
-                    </p>
-                  </div>
-                  <Button
-                    size="lg"
-                    className="bg-[#27AE60] hover:bg-[#1e8c4d] w-full sm:w-auto"
-                    onClick={handlePay}
-                    disabled={loading}
-                  >
-                    {loading ? 'Processing...' : 'Proceed to Payment'}
-                  </Button>
+                <div style={styles.paymentDesc}>
+                  Complete payment to confirm your booking
                 </div>
               </div>
-            </CardContent>
-          </Card>
+              <div style={styles.paymentRight}>
+                <div style={styles.priceBox}>
+                  <div style={styles.priceLabel}>Total Amount</div>
+                  <div style={styles.priceAmount}>
+                    RWF {schedule.price.toLocaleString()}
+                  </div>
+                </div>
+                <button
+                  onClick={handlePay}
+                  disabled={loading}
+                  style={styles.payButton}
+                  onMouseEnter={(e) => {
+                    if (!loading) {
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                      e.currentTarget.style.boxShadow = '0 12px 32px rgba(39,174,96,0.4)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 8px 24px rgba(39,174,96,0.3)';
+                  }}
+                >
+                  {loading ? 'Processing...' : 'Proceed to Payment →'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
+
+      <style>
+        {`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}
+      </style>
     </div>
   );
 }

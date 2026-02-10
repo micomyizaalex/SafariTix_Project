@@ -12,9 +12,20 @@ import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import ScheduleDetails from './pages/ScheduleDetails';
 import { AdminDashboard } from './components/AdminDashboard';
-import { CompanyDashboard } from './components/CompanyDashboard';
+import { CompanyDashboardLayout } from './components/CompanyDashboardLayout';
+import { CompanyHome } from './components/CompanyHome';
 import { CommuterDashboard } from './components/CommuterDashboard';
 import { DriverDashboard } from './components/DriverDashboard';
+import { Schedules } from './components/schedules';
+import Tickets from './pages/Tickets';
+import Buses from './pages/Buses';
+import Drivers from './pages/Drivers';
+import CompanySettings from './pages/CompanySettings';
+import LiveTracking from './pages/LiveTracking';
+import Revenue from './pages/Revenue';
+import SubscriptionPage from './pages/SubscriptionPage';
+import ReportsPage from './pages/ReportsPage';
+import DriverTracking from './pages/DriverTracking';
 
 const App = () => {
   return (
@@ -37,7 +48,21 @@ const App = () => {
             {/* Dashboard routes */}
             <Route path='/dashboard' element={<Layout />}>
               <Route path='admin' element={<RequireRole allowed={["admin"]}><AdminDashboard/></RequireRole>} />
-              <Route path='company' element={<RequireRole allowed={["company_admin"]}><CompanyDashboard/></RequireRole>} />
+              
+              {/* Company Dashboard with nested routes */}
+              <Route path='company' element={<RequireRole allowed={["company_admin"]}><CompanyDashboardLayout/></RequireRole>}>
+                <Route index element={<CompanyHome />} />
+                <Route path='schedules' element={<Schedules />} />
+                <Route path='tickets' element={<Tickets />} />
+                <Route path='buses' element={<Buses />} />
+                <Route path='drivers' element={<Drivers />} />
+                <Route path='tracking' element={<LiveTracking />} />
+                <Route path='revenue' element={<Revenue />} />
+                <Route path='subscription' element={<SubscriptionPage />} />
+                <Route path='reports' element={<ReportsPage />} />
+                <Route path='settings' element={<CompanySettings />} />
+              </Route>
+              
               <Route path='commuter' element={<RequireRole allowed={["commuter"]}><CommuterDashboard/></RequireRole>} />
               <Route path='driver' element={<RequireRole allowed={["driver"]}><DriverDashboard/></RequireRole>} />
               <Route path='*' element={<NotFound />} />
@@ -46,9 +71,19 @@ const App = () => {
             {/* Alias dashboard routes */}
             <Route path='/driver/dashboard' element={<Layout />}>
               <Route index element={<RequireRole allowed={["driver"]}><DriverDashboard/></RequireRole>} />
+              <Route path='tracking' element={<RequireRole allowed={["driver"]}><DriverTracking/></RequireRole>} />
             </Route>
-            <Route path='/company/dashboard' element={<Layout />}>
-              <Route index element={<RequireRole allowed={["company_admin"]}><CompanyDashboard/></RequireRole>} />
+            <Route path='/company/dashboard' element={<RequireRole allowed={["company_admin"]}><CompanyDashboardLayout/></RequireRole>}>
+              <Route index element={<CompanyHome />} />
+              <Route path='schedules' element={<Schedules />} />
+              <Route path='tickets' element={<Tickets />} />
+              <Route path='buses' element={<Buses />} />
+              <Route path='drivers' element={<Drivers />} />
+              <Route path='tracking' element={<LiveTracking />} />
+              <Route path='revenue' element={<Revenue />} />
+              <Route path='subscription' element={<SubscriptionPage />} />
+              <Route path='reports' element={<ReportsPage />} />
+              <Route path='settings' element={<CompanySettings />} />
             </Route>
 
             {/* Fallback route */}

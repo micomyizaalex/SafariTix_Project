@@ -125,9 +125,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setAccessToken(null);
 
-    // Redirect to login page
+    // Redirect to landing page
     try {
-      window.location.href = '/login';
+      window.location.href = '/';
     } catch (err) {
       // ignore
     }

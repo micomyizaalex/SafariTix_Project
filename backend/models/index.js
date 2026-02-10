@@ -16,6 +16,7 @@ const Payment = require("./Payment");
 const ScheduleJournal = require('./ScheduleJournal');
 const Seat = require('./Seat');
 const SeatLock = require('./SeatLock');
+const LiveBusLocation = require('./LiveBusLocation');
 
 // ============================================
 // RELATIONSHIPS / ASSOCIATIONS
@@ -48,6 +49,7 @@ Bus.belongsTo(Company, { foreignKey: "company_id" });
 Bus.belongsTo(Driver, { foreignKey: "driver_id", as: "driver" });
 Bus.hasMany(DriverAssignment, { foreignKey: "bus_id" });
 Bus.hasMany(Journal, { foreignKey: "bus_id" });
+Bus.hasOne(LiveBusLocation, { foreignKey: "bus_id", as: "liveLocation" });
 Bus.hasMany(Schedule, { foreignKey: "bus_id" });
 Bus.hasMany(Location, { foreignKey: "bus_id" });
 Bus.hasMany(Seat, { foreignKey: "bus_id" });
@@ -106,6 +108,10 @@ Location.belongsTo(Bus, { foreignKey: "bus_id" });
 Location.belongsTo(Driver, { foreignKey: "driver_id" });
 Location.belongsTo(Schedule, { foreignKey: "schedule_id" });
 
+// LiveBusLocation relationships
+LiveBusLocation.belongsTo(Bus, { foreignKey: "bus_id", as: "bus" });
+LiveBusLocation.belongsTo(Driver, { foreignKey: "driver_id", as: "driver" });
+
 // Notification relationships
 Notification.belongsTo(User, { foreignKey: "user_id", as: "user" });
 
@@ -122,8 +128,9 @@ module.exports = {
   Schedule,
   Ticket,
   Location,
-  Payment
-  ,Seat,
-  SeatLock
-  ,ScheduleJournal
+  Payment,
+  Seat,
+  SeatLock,
+  ScheduleJournal,
+  LiveBusLocation
 }

@@ -10,6 +10,7 @@ const paymentRoutes = require('./payments');
 const driverRoutes = require('./driver');
 const busesRoutes = require('./buses');
 const seatsRoutes = require('./seats');
+const liveTrackingRoutes = require('./liveTracking');
 const publicController = require('../controllers/publicController');
 const auth = require('../middleware/authenticate');
 
@@ -23,6 +24,7 @@ router.use('/payments', paymentRoutes);
 router.use('/driver', driverRoutes);
 router.use('/buses', busesRoutes);
 router.use('/seats', seatsRoutes);
+router.use('/tracking', liveTrackingRoutes);
 
 // Public endpoints (no authentication required)
 router.get('/schedules', publicController.getAvailableSchedules);

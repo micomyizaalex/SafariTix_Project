@@ -1,18 +1,19 @@
-import { useState, useEffect } from 'react';
+const SAFARITIX = {
+  primary: '#0077B6',
+  primaryDark: '#005F8E',
+  primarySoft: '#E6F4FB',
+};
+import { useState, useEffect, CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
-import { API_URL, supabase } from '../utils/supabase-client';
+import { API_URL } from '../utils/supabase-client';
 import { publicAnonKey } from '../utils/supabase/info';
 import { ThemeToggle } from './ThemeToggle';
 import { PaymentModal } from './PaymentModal';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Bus, Ticket, MapPin, LogOut, Search, Calendar, Clock, ArrowRight, Users, Check, Settings } from 'lucide-react';
+import { Bus, Ticket, MapPin, LogOut, Calendar, Clock, ArrowRight, Search, TrendingUp, Zap, Star, Award } from 'lucide-react';
 import { Input } from './ui/input';
-import { Label } from './ui/label';
 import { CommuterSettings } from './CommuterSettings';
 import { TicketDisplay } from './TicketDisplay';
 
@@ -27,9 +28,6 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
   const [filteredSchedules, setFilteredSchedules] = useState<any[]>([]);
   const [tickets, setTickets] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
-  const [companies, setCompanies] = useState<any[]>([]);
-  const [buses, setBuses] = useState<any[]>([]);
-  const [drivers, setDrivers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchFrom, setSearchFrom] = useState('');
@@ -37,41 +35,30 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
   const [selectedSchedule, setSelectedSchedule] = useState<any>(null);
   const [numTickets, setNumTickets] = useState(1);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [showAllTickets, setShowAllTickets] = useState(false);
   const [recentTicket, setRecentTicket] = useState<any | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState('home');
 
   useEffect(() => {
-    // fetchData can run on mount for public endpoints; protected endpoints are skipped if no accessToken
     fetchData();
     const interval = setInterval(fetchLocations, 5000);
     return () => clearInterval(interval);
   }, [accessToken]);
 
-  // Auto-search with debouncing when from/to fields change
   useEffect(() => {
     if (!searchFrom || !searchTo) {
       setFilteredSchedules([]);
       return;
     }
-
-    // Set a timer to debounce the search (wait 800ms after user stops typing)
     const searchTimer = setTimeout(() => {
       performSearch();
     }, 800);
-
-    // Cleanup timer if component unmounts or search fields change again
     return () => clearTimeout(searchTimer);
   }, [searchFrom, searchTo]);
 
-  /**
-   * Search schedules using the new PostgreSQL-based backend endpoint
-   * Uses parameterized SQL queries via /api/schedules/search-pg
-   */
   async function performSearch() {
     if (!searchFrom || !searchTo) {
-      setSearchError('Please enter both From and To');
+      setSearchError('Enter both locations');
       setFilteredSchedules([]);
       return;
     }
@@ -80,107 +67,74 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
     setSearchLoading(true);
     
     try {
-      // Call the new backend endpoint using pg Pool
       const response = await fetch(
         `${API_URL}/schedules/search-pg?from=${encodeURIComponent(searchFrom.trim())}&to=${encodeURIComponent(searchTo.trim())}`,
-        {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
+        { method: 'GET', headers: { 'Content-Type': 'application/json' } }
       );
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        const errorMessage = errorData.message || errorData.error || `HTTP ${response.status}: Failed to search schedules`;
-        console.error('Search API error:', errorData);
-        throw new Error(errorMessage);
+        throw new Error(errorData.message || errorData.error || 'Search failed');
       }
 
       const data = await response.json();
 
-      // Handle empty results
       if (!data.schedules || data.schedules.length === 0) {
         setFilteredSchedules([]);
-        setSearchError('No schedules available for this route');
+        setSearchError('No buses found');
         return;
       }
 
-      // Map the response to match the existing UI structure
       const mapped = data.schedules.map((s: any) => ({
         id: s.id,
         routeFrom: s.from_location,
         routeTo: s.to_location,
         departureTime: s.departure_time,
-        scheduleDate: s.schedule_date, // Travel date from database
+        scheduleDate: s.schedule_date,
         seatsAvailable: s.available_seats,
         bookedSeats: s.booked_seats || 0,
         price: Number(s.price) || 0,
         companyName: s.company_name || 'N/A',
         companyId: s.company_id,
         busPlateNumber: s.bus_plate_number || 'N/A',
-        driverName: s.driver_name || 'No driver assigned',
+        driverName: s.driver_name || 'No driver',
         status: 'scheduled'
       }));
 
       setFilteredSchedules(mapped);
       setSearchError(null);
     } catch (error: any) {
-      console.error('Schedule search error:', error);
-      // Show user-friendly error message
-      const errorMessage = error.message || 'Unable to fetch schedules right now. Please try again.';
-      setSearchError(errorMessage);
+      setSearchError(error.message || 'Search failed');
       setFilteredSchedules([]);
     } finally {
       setSearchLoading(false);
     }
   }
 
-  async function searchSchedulesByRoute() {
-    if (!searchFrom || !searchTo) {
-      alert('Please enter both departure and destination cities');
-      return;
-    }
-    performSearch();
-  }
-
   async function fetchData() {
     try {
       const [schedulesRes, ticketsRes, locationsRes] = await Promise.all([
-        fetch(`${API_URL}/schedules`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
-        }).catch(() => null),
+        fetch(`${API_URL}/schedules`, { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }).catch(() => null),
         (accessToken ? fetch(`${API_URL}/tickets`, { headers: { 'Authorization': `Bearer ${accessToken}` } }).catch(() => null) : Promise.resolve(null)),
-        fetch(`${API_URL}/tracking`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
-        }).catch(() => null)
+        fetch(`${API_URL}/tracking`, { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }).catch(() => null)
       ]);
 
-      if (schedulesRes && schedulesRes.ok) {
+      if (schedulesRes?.ok) {
         const data = await schedulesRes.json();
         setSchedules(data.schedules);
       }
 
-      if (ticketsRes && ticketsRes.ok) {
+      if (ticketsRes?.ok) {
         const data = await ticketsRes.json();
         setTickets(data.tickets);
       }
 
-      if (locationsRes && locationsRes.ok) {
+      if (locationsRes?.ok) {
         const data = await locationsRes.json();
         setLocations(data.locations);
       }
-
-      // Mock drivers data
-      setDrivers([
-        { id: '1', name: 'John Mukiza' },
-        { id: '2', name: 'Peter Uwase' },
-        { id: '3', name: 'Grace Umutoni' },
-        { id: '4', name: 'David Niyonzima' }
-      ]);
     } catch (error) {
-      // Commuter data fetch errors are handled silently
+      // Silent
     } finally {
       setLoading(false);
     }
@@ -188,596 +142,997 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
 
   async function fetchLocations() {
     try {
-      const res = await fetch(`${API_URL}/tracking`, {
-        headers: { 'Authorization': `Bearer ${publicAnonKey}` }
-      });
+      const res = await fetch(`${API_URL}/tracking`, { headers: { 'Authorization': `Bearer ${publicAnonKey}` } });
       if (res.ok) {
         const data = await res.json();
         setLocations(data.locations);
       }
-    } catch (error) {
-      // Network errors are expected if backend endpoint doesn't exist yet - handle silently
-    }
+    } catch (error) {}
   }
 
   async function handleCancelTicket(ticketId: string) {
-    if (!confirm('Are you sure you want to cancel this ticket?')) return;
-
+    if (!confirm('Cancel ticket?')) return;
     try {
       const res = await fetch(`${API_URL}/tickets/${ticketId}/cancel`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
       });
-
-      if (res.ok) {
-        await fetchData();
-      }
-    } catch (error) {
-      // Ticket cancellation errors are handled silently
-    }
+      if (res.ok) await fetchData();
+    } catch (error) {}
   }
 
   async function handlePaymentSuccess() {
-    // Payment and booking are now handled in PaymentModal
-    // Just refresh data and reset state
     setShowPaymentModal(false);
     setSelectedSchedule(null);
     setNumTickets(1);
     await fetchData();
-    
-    // Switch to My Tickets tab to show the new ticket
-    // Note: You may need to add tab switching logic if you have tab state
+    setActiveTab('tickets');
   }
 
-  // Sort tickets by creation date (newest first) and limit to last 5 if not showing all
-  const sortedTickets = [...tickets].sort((a, b) => {
-    const dateA = new Date(a.createdAt || 0).getTime();
-    const dateB = new Date(b.createdAt || 0).getTime();
-    return dateB - dateA; // Newest first
-  });
-  
-  const displayedTickets = showAllTickets ? sortedTickets : sortedTickets.slice(0, 5);
-  const hasMoreTickets = tickets.length > 5;
+  const sortedTickets = [...tickets].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  const activeTickets = sortedTickets.filter(t => t.status !== 'cancelled');
+  const upcomingTicket = activeTickets[0];
 
-  // Get company, bus, and driver info for schedule
-  const getScheduleDetails = (schedule: any) => {
-    const company = companies.find(c => c.id === schedule.companyId);
-    const bus = buses.find(b => b.id === schedule.busId);
-    const driver = drivers.find(d => d.id === bus?.driverId);
-    return { company, bus, driver };
+  const styles: Record<string, CSSProperties> = {
+    container: {
+      minHeight: '100vh',
+      background: `linear-gradient(135deg, ${SAFARITIX.primary} 0%, ${SAFARITIX.primaryDark} 100%)`,
+      position: 'relative' as const,
+      paddingBottom: '90px',
+    },
+    // Animated Background Blobs
+    blob1: {
+      position: 'absolute' as const,
+      top: '-10%',
+      right: '-5%',
+      width: '500px',
+      height: '500px',
+      background: 'radial-gradient(circle, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0) 70%)',
+      borderRadius: '50%',
+      filter: 'blur(60px)',
+      animation: 'float 20s ease-in-out infinite',
+      zIndex: 0,
+    },
+    blob2: {
+      position: 'absolute' as const,
+      bottom: '-10%',
+      left: '-5%',
+      width: '400px',
+      height: '400px',
+      background: 'radial-gradient(circle, rgba(103,126,234,0.2) 0%, rgba(103,126,234,0) 70%)',
+      borderRadius: '50%',
+      filter: 'blur(50px)',
+      animation: 'float 15s ease-in-out infinite reverse',
+      zIndex: 0,
+    },
+    // Header
+    header: {
+      padding: '20px 16px',
+      position: 'relative' as const,
+      zIndex: 10,
+    },
+    headerContent: {
+      maxWidth: '1200px',
+      margin: '0 auto',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    userSection: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+    },
+    avatar: {
+      width: '48px',
+      height: '48px',
+      borderRadius: '50%',
+      background: 'linear-gradient(135deg, #fff 0%, #f0f0f0 100%)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '20px',
+      fontWeight: '700',
+      color: `${SAFARITIX.primary}`,
+      border: '3px solid rgba(255,255,255,0.3)',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+    },
+    greeting: {
+      color: 'white',
+    },
+    greetingText: {
+      fontSize: '14px',
+      opacity: 0.9,
+      marginBottom: '2px',
+    },
+    userName: {
+      fontSize: '20px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+    },
+    headerActions: {
+      display: 'flex',
+      gap: '8px',
+    },
+    iconButton: {
+      width: '40px',
+      height: '40px',
+      borderRadius: '12px',
+      background: 'rgba(255,255,255,0.15)',
+      backdropFilter: 'blur(10px)',
+      border: '1px solid rgba(255,255,255,0.2)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      cursor: 'pointer',
+      transition: 'all 0.3s',
+      color: 'white',
+    },
+    // Main Content
+    content: {
+      maxWidth: '1200px',
+      margin: '0 auto',
+      padding: '0 16px',
+      position: 'relative' as const,
+      zIndex: 10,
+    },
+    // Stats Cards
+    statsGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(3, 1fr)',
+      gap: '12px',
+      marginBottom: '24px',
+    },
+    statCard: {
+      background: 'rgba(255,255,255,0.15)',
+      backdropFilter: 'blur(10px)',
+      borderRadius: '20px',
+      padding: '16px',
+      border: '1px solid rgba(255,255,255,0.2)',
+      color: 'white',
+      position: 'relative' as const,
+      overflow: 'hidden' as const,
+    },
+    statIcon: {
+      width: '36px',
+      height: '36px',
+      borderRadius: '10px',
+      background: 'rgba(255,255,255,0.2)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: '12px',
+    },
+    statValue: {
+      fontSize: '28px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+      marginBottom: '4px',
+    },
+    statLabel: {
+      fontSize: '12px',
+      opacity: 0.9,
+    },
+    // Search Card
+    searchCard: {
+      background: 'white',
+      borderRadius: '24px',
+      padding: '24px',
+      marginBottom: '24px',
+      boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+    },
+    searchHeader: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '20px',
+    },
+    searchTitle: {
+      fontSize: '20px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+      color: '#1a1a1a',
+    },
+    quickFilters: {
+      display: 'flex',
+      gap: '8px',
+    },
+    filterPill: {
+      padding: '6px 12px',
+      borderRadius: '20px',
+      fontSize: '12px',
+      fontWeight: '500',
+      cursor: 'pointer',
+      transition: 'all 0.2s',
+      border: 'none',
+    },
+    searchInputs: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '12px',
+      marginBottom: '12px',
+    },
+    inputWrapper: {
+      position: 'relative' as const,
+      width: '100%',
+    },
+    searchInput: {
+      width: '100%',
+      padding: '14px 16px 14px 44px',
+      borderRadius: '12px',
+      border: '2px solid #e5e7eb',
+      fontSize: '14px',
+      outline: 'none',
+      transition: 'all 0.2s',
+      background: '#f9fafb',
+      boxSizing: 'border-box' as const,
+    },
+    inputIcon: {
+      position: 'absolute' as const,
+      left: '14px',
+      top: '50%',
+      transform: 'translateY(-50%)',
+      color: '#667eea',
+    },
+    // Bus Card (Modern)
+    busCard: {
+      background: 'white',
+      borderRadius: '24px',
+      padding: '20px',
+      marginBottom: '16px',
+      boxShadow: '0 10px 40px rgba(0,0,0,0.08)',
+      transition: 'all 0.3s',
+      position: 'relative' as const,
+      overflow: 'hidden' as const,
+    },
+    busCardAccent: {
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      width: '4px',
+      height: '100%',
+      background: `linear-gradient(180deg, ${SAFARITIX.primary} 0%, ${SAFARITIX.primaryDark} 100%)`,
+    },
+    busHeader: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: '16px',
+    },
+    companyBadge: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '8px 14px',
+      background: `linear-gradient(135deg, ${SAFARITIX.primary} 50%, ${SAFARITIX.primaryDark} 100%)`,
+      borderRadius: '12px',
+      color: 'white',
+      fontSize: '13px',
+      fontWeight: '600',
+    },
+    seatsBadge: {
+      padding: '8px 16px',
+      borderRadius: '12px',
+      fontSize: '13px',
+      fontWeight: '600',
+      color: 'white',
+    },
+    routeDisplay: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+      marginBottom: '20px',
+    },
+    cityName: {
+      fontSize: '24px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+      color: '#1a1a1a',
+    },
+    routeArrow: {
+      width: '24px',
+      height: '24px',
+      color: `${SAFARITIX.primary}`,
+    },
+    infoGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(2, 1fr)',
+      gap: '16px',
+      marginBottom: '20px',
+    },
+    infoItem: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+    },
+    infoIconBox: {
+      width: '40px',
+      height: '40px',
+      borderRadius: '12px',
+      background: '#f3f4f6',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: `${SAFARITIX.primary}`,
+    },
+    infoText: {
+      flex: 1,
+    },
+    infoLabel: {
+      fontSize: '12px',
+      color: '#6b7280',
+      marginBottom: '2px',
+    },
+    infoValue: {
+      fontSize: '14px',
+      fontWeight: '600',
+      color: '#1a1a1a',
+    },
+    priceRow: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '16px',
+      background: 'linear-gradient(135deg, #f0f4ff 0%, #e8f0fe 100%)',
+      borderRadius: '16px',
+    },
+    priceBox: {
+      flex: 1,
+    },
+    priceLabel: {
+      fontSize: '12px',
+      color: `${SAFARITIX.primary}`,
+      marginBottom: '4px',
+      fontWeight: '500',
+    },
+    priceAmount: {
+      fontSize: '32px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+      color: `${SAFARITIX.primary}`,
+    },
+    bookButton: {
+      padding: '14px 28px',
+      background: `linear-gradient(135deg, ${SAFARITIX.primary} 0%, ${SAFARITIX.primaryDark} 100%)`,
+      color: 'white',
+      border: 'none',
+      borderRadius: '16px',
+      fontSize: '15px',
+      fontWeight: '600',
+      cursor: 'pointer',
+      transition: 'all 0.3s',
+      boxShadow: '0 8px 24px rgba(102,126,234,0.3)',
+    },
+    // Ticket Card
+    ticketCard: {
+      background: `linear-gradient(135deg, ${SAFARITIX.primary} 0%, ${SAFARITIX.primaryDark} 100%)`,
+      borderRadius: '24px',
+      padding: '24px',
+      color: 'white',
+      marginBottom: '20px',
+      position: 'relative' as const,
+      overflow: 'hidden' as const,
+      boxShadow: '0 20px 60px rgba(102,126,234,0.4)',
+    },
+    ticketPattern: {
+      position: 'absolute' as const,
+      top: 0,
+      right: 0,
+      width: '200px',
+      height: '200px',
+      background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%)',
+      borderRadius: '50%',
+      filter: 'blur(40px)',
+    },
+    ticketHeader: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: '20px',
+      position: 'relative' as const,
+      zIndex: 1,
+    },
+    nextTripBadge: {
+      fontSize: '12px',
+      padding: '6px 12px',
+      background: 'rgba(255,255,255,0.2)',
+      borderRadius: '20px',
+      marginBottom: '8px',
+      display: 'inline-block',
+    },
+    ticketRoute: {
+      fontSize: '24px',
+      fontWeight: '700',
+      fontFamily: 'Montserrat, sans-serif',
+      marginBottom: '4px',
+    },
+    seatBadge: {
+      padding: '8px 16px',
+      background: 'rgba(255,255,255,0.2)',
+      borderRadius: '12px',
+      fontSize: '14px',
+      fontWeight: '600',
+    },
+    ticketInfo: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(3, 1fr)',
+      gap: '16px',
+      marginBottom: '20px',
+      position: 'relative' as const,
+      zIndex: 1,
+    },
+    ticketInfoItem: {
+      background: 'rgba(255,255,255,0.1)',
+      borderRadius: '12px',
+      padding: '12px',
+    },
+    ticketLabel: {
+      fontSize: '11px',
+      opacity: 0.8,
+      marginBottom: '4px',
+    },
+    ticketValue: {
+      fontSize: '16px',
+      fontWeight: '600',
+    },
+    // Bottom Nav
+    bottomNav: {
+      position: 'fixed' as const,
+      bottom: 0,
+      left: 0,
+      right: 0,
+      background: 'rgba(255,255,255,0.95)',
+      backdropFilter: 'blur(20px)',
+      borderTop: '1px solid rgba(0,0,0,0.05)',
+      padding: '12px 0',
+      zIndex: 100,
+      boxShadow: '0 -10px 40px rgba(0,0,0,0.08)',
+    },
+    navContent: {
+      maxWidth: '600px',
+      margin: '0 auto',
+      display: 'grid',
+      gridTemplateColumns: 'repeat(4, 1fr)',
+      gap: '8px',
+      padding: '0 16px',
+    },
+    navItem: {
+      display: 'flex',
+      flexDirection: 'column' as const,
+      alignItems: 'center',
+      gap: '6px',
+      padding: '10px',
+      borderRadius: '16px',
+      cursor: 'pointer',
+      border: 'none',
+      background: 'transparent',
+      transition: 'all 0.3s',
+    },
+    navItemActive: {
+      background: `linear-gradient(135deg, ${SAFARITIX.primary} 0%, ${SAFARITIX.primaryDark} 100%)`,
+      color: 'white',
+    },
+    navItemInactive: {
+      color: '#6b7280',
+    },
+    navLabel: {
+      fontSize: '12px',
+      fontWeight: '600',
+    },
+    // Empty State
+    emptyState: {
+      textAlign: 'center' as const,
+      padding: '60px 20px',
+    },
+    emptyIllustration: {
+      width: '120px',
+      height: '120px',
+      margin: '0 auto 24px',
+      background: `linear-gradient(135deg, ${SAFARITIX.primary} 0%, ${SAFARITIX.primaryDark} 100%)`,
+      borderRadius: '50%',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      opacity: 0.15,
+    },
+    emptyTitle: {
+      fontSize: '20px',
+      fontWeight: '700',
+      marginBottom: '8px',
+      color: 'white',
+    },
+    emptyText: {
+      fontSize: '14px',
+      color: 'rgba(255,255,255,0.8)',
+    },
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen">Loading...</div>;
+    return (
+      <div style={{ ...styles.container, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '60px',
+            height: '60px',
+            border: '4px solid rgba(255,255,255,0.2)',
+            borderTopColor: 'white',
+            borderRadius: '50%',
+            margin: '0 auto 20px',
+            animation: 'spin 1s linear infinite',
+          }} />
+          <p style={{ color: 'white', fontSize: '16px' }}>Loading your journey...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="border-b">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <Bus className="w-6 h-6 text-[#0077B6]" />
-            <div>
-              <h1 style={{ fontFamily: 'Montserrat, sans-serif' }}>SafariTix</h1>
-              <p className="text-sm text-muted-foreground">Welcome, {user?.name}</p>
+    <div style={styles.container}>
+      {/* Background Blobs */}
+      <div style={styles.blob1} />
+      <div style={styles.blob2} />
+
+      {/* Header */}
+      <div style={styles.header}>
+        <div style={styles.headerContent}>
+          <div style={styles.userSection}>
+            <div style={styles.avatar}>
+              {(user?.name || 'G').charAt(0).toUpperCase()}
+            </div>
+            <div style={styles.greeting}>
+              <div style={styles.greetingText}>Welcome back,</div>
+              <div style={styles.userName}>{user?.name || 'Guest'}</div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <ThemeToggle />
-            <Button variant="outline" size="sm" onClick={signOut}>
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </Button>
+          <div style={styles.headerActions}>
+            <button
+              style={styles.iconButton}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.25)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
+            >
+              <ThemeToggle />
+            </button>
+            <button
+              onClick={signOut}
+              style={styles.iconButton}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.25)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
+            >
+              <LogOut style={{ width: '20px', height: '20px' }} />
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="container mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm">My Tickets</CardTitle>
-              <Ticket className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                {tickets.filter(t => t.status !== 'cancelled').length}
+      {/* Content */}
+      <div style={styles.content}>
+        {activeTab === 'home' && (
+          <>
+            {/* Stats Grid */}
+            <div style={styles.statsGrid}>
+              <div style={styles.statCard}>
+                <div style={styles.statIcon}>
+                  <Ticket style={{ width: '20px', height: '20px' }} />
+                </div>
+                <div style={styles.statValue}>{activeTickets.length}</div>
+                <div style={styles.statLabel}>Active Tickets</div>
               </div>
-              <p className="text-xs text-muted-foreground">Active bookings</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm">Available Trips</CardTitle>
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                {schedules.length}
+              <div style={styles.statCard}>
+                <div style={styles.statIcon}>
+                  <TrendingUp style={{ width: '20px', height: '20px' }} />
+                </div>
+                <div style={styles.statValue}>{schedules.length}</div>
+                <div style={styles.statLabel}>Routes</div>
               </div>
-              <p className="text-xs text-muted-foreground">Ready to book</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm">Live Buses</CardTitle>
-              <MapPin className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                {locations.length}
+              <div style={styles.statCard}>
+                <div style={styles.statIcon}>
+                  <Zap style={{ width: '20px', height: '20px' }} />
+                </div>
+                <div style={styles.statValue}>{locations.length}</div>
+                <div style={styles.statLabel}>Live Buses</div>
               </div>
-              <p className="text-xs text-muted-foreground">Tracking now</p>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
 
-        <Tabs defaultValue="book" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="book">Book Ticket</TabsTrigger>
-            <TabsTrigger value="tickets">My Tickets</TabsTrigger>
-            <TabsTrigger value="track">Track Bus</TabsTrigger>
-            <TabsTrigger value="settings">
-              <Settings className="w-4 h-4 mr-2" />
-              Settings
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="book">
-            <Card>
-              <CardHeader>
-                <CardTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>Search & Book</CardTitle>
-                <CardDescription>Find and book your bus tickets</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>From</Label>
-                    <Input
-                      placeholder="Departure city (e.g., Kigali)"
-                      value={searchFrom}
-                      onChange={(e) => setSearchFrom(e.target.value)}
-                      autoComplete="off"
-                    />
+            {/* Upcoming Trip */}
+            {upcomingTicket && (
+              <div style={styles.ticketCard}>
+                <div style={styles.ticketPattern} />
+                <div style={styles.ticketHeader}>
+                  <div>
+                    <div style={styles.nextTripBadge}>🎫 Your Next Trip</div>
+                    <div style={styles.ticketRoute}>
+                      {upcomingTicket.routeFrom} → {upcomingTicket.routeTo}
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label>To</Label>
-                    <Input
-                      placeholder="Destination city (e.g., Musanze)"
-                      value={searchTo}
-                      onChange={(e) => setSearchTo(e.target.value)}
-                      autoComplete="off"
-                    />
+                  <div style={styles.seatBadge}>Seat {upcomingTicket.seatNumber}</div>
+                </div>
+                <div style={styles.ticketInfo}>
+                  <div style={styles.ticketInfoItem}>
+                    <div style={styles.ticketLabel}>Date</div>
+                    <div style={styles.ticketValue}>
+                      {upcomingTicket.scheduleDate 
+                        ? new Date(upcomingTicket.scheduleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                        : 'Today'}
+                    </div>
+                  </div>
+                  <div style={styles.ticketInfoItem}>
+                    <div style={styles.ticketLabel}>Time</div>
+                    <div style={styles.ticketValue}>
+                      {upcomingTicket.departureTime 
+                        ? new Date(upcomingTicket.departureTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+                        : 'N/A'}
+                    </div>
+                  </div>
+                  <div style={styles.ticketInfoItem}>
+                    <div style={styles.ticketLabel}>Price</div>
+                    <div style={styles.ticketValue}>
+                      RWF {upcomingTicket.price?.toLocaleString()}
+                    </div>
                   </div>
                 </div>
-                
-                {searchLoading && (searchFrom || searchTo) && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <div className="animate-spin h-4 w-4 border-2 border-[#0077B6] border-t-transparent rounded-full"></div>
-                    Searching for available schedules...
-                  </div>
-                )}
+                <Button
+                  onClick={() => setRecentTicket(upcomingTicket)}
+                  style={{
+                    width: '100%',
+                    background: 'white',
+                    color: '#667eea',
+                    fontWeight: '600',
+                    padding: '14px',
+                    borderRadius: '16px',
+                    position: 'relative',
+                    zIndex: 1,
+                  }}
+                >
+                  View QR Code →
+                </Button>
+              </div>
+            )}
 
-                {searchError && (
-                  <div className="text-sm text-red-600 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md px-3 py-2">
-                    {searchError}
-                  </div>
-                )}
+            {/* Search Card */}
+            <div style={styles.searchCard}>
+              <div style={styles.searchHeader}>
+                <div style={styles.searchTitle}>Find Your Bus</div>
+                <div style={styles.quickFilters}>
+                  <button
+                    style={{
+                      ...styles.filterPill,
+                      background: '#e0e7ff',
+                      color: '#667eea',
+                    }}
+                  >
+                    Popular
+                  </button>
+                  <button
+                    style={{
+                      ...styles.filterPill,
+                      background: '#f3f4f6',
+                      color: '#6b7280',
+                    }}
+                  >
+                    Today
+                  </button>
+                </div>
+              </div>
 
-                {!searchFrom && !searchTo && (
-                  <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-6 rounded-lg text-center space-y-2">
-                    <Bus className="w-12 h-12 mx-auto text-[#0077B6]" />
-                    <h4 className="font-semibold text-[#0077B6]" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                      Find Your Bus Journey
-                    </h4>
-                    <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                      Enter your departure city and destination above to search for available bus schedules with seats.
-                      Results will appear automatically as you type.
-                    </p>
+              <div style={styles.searchInputs}>
+                <div style={styles.inputWrapper}>
+                  <div style={styles.inputIcon}>
+                    <MapPin style={{ width: '20px', height: '20px' }} />
                   </div>
-                )}
+                  <input
+                    placeholder="From city"
+                    value={searchFrom}
+                    onChange={(e) => setSearchFrom(e.target.value)}
+                    style={styles.searchInput}
+                    onFocus={(e) => e.currentTarget.style.borderColor = SAFARITIX.primary}
+                    onBlur={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
+                  />
+                </div>
+                <div style={styles.inputWrapper}>
+                  <div style={styles.inputIcon}>
+                    <MapPin style={{ width: '20px', height: '20px' }} />
+                  </div>
+                  <input
+                    placeholder="To city"
+                    value={searchTo}
+                    onChange={(e) => setSearchTo(e.target.value)}
+                    style={styles.searchInput}
+                    onFocus={(e) => e.currentTarget.style.borderColor = SAFARITIX.primary}
+                    onBlur={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
+                  />
+                </div>
+              </div>
 
-                {(searchFrom || searchTo) && (
-                  <div className="space-y-4 pt-4 border-t">
-                    <h3 className="font-semibold" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                      Available Schedules ({filteredSchedules.length})
-                    </h3>
-                    
-                    {filteredSchedules.length === 0 && !searchLoading ? (
-                      <div className="text-center py-8 space-y-2">
-                        <p className="text-muted-foreground">No schedules found with available seats</p>
-                        {searchFrom && searchTo && (
-                          <p className="text-sm text-muted-foreground">
-                            Try searching for different dates or routes
-                          </p>
-                        )}
+              {searchLoading && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: SAFARITIX.primary, fontSize: '14px' }}>
+                  <div style={{ width: '16px', height: '16px', border: `2px solid ${SAFARITIX.primary}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                  Searching buses...
+                </div>
+              )}
+
+              {searchError && (
+                <div style={{ color: '#dc2626', fontSize: '14px', marginTop: '8px' }}>
+                  {searchError}
+                </div>
+              )}
+            </div>
+
+            {/* Bus Results */}
+            {!searchFrom && !searchTo ? (
+              <div style={styles.emptyState}>
+                <div style={styles.emptyIllustration}>
+                  <Search style={{ width: '60px', height: '60px', color: 'white' }} />
+                </div>
+                <div style={styles.emptyTitle}>Start Your Journey</div>
+                <div style={styles.emptyText}>Enter your route to discover available buses</div>
+              </div>
+            ) : filteredSchedules.length === 0 && !searchLoading ? (
+              <div style={styles.emptyState}>
+                <div style={styles.emptyIllustration}>
+                  <Bus style={{ width: '60px', height: '60px', color: 'white' }} />
+                </div>
+                <div style={styles.emptyTitle}>No Buses Found</div>
+                <div style={styles.emptyText}>Try a different route or date</div>
+              </div>
+            ) : (
+              filteredSchedules.map((schedule) => {
+                const isLowSeats = schedule.seatsAvailable <= 5;
+                return (
+                  <div
+                    key={schedule.id}
+                    style={styles.busCard}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-4px)';
+                      e.currentTarget.style.boxShadow = '0 20px 60px rgba(0,0,0,0.12)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow = '0 10px 40px rgba(0,0,0,0.08)';
+                    }}
+                  >
+                    <div style={styles.busCardAccent} />
+                    <div style={styles.busHeader}>
+                      <div style={styles.companyBadge}>
+                        <Award style={{ width: '16px', height: '16px' }} />
+                        {schedule.companyName}
                       </div>
-                    ) : (
-                      filteredSchedules.map((schedule) => {
-                        const isLowSeats = schedule.seatsAvailable <= 5 && schedule.seatsAvailable > 0;
-                        const totalSeats = schedule.seatsAvailable + schedule.bookedSeats;
-                        const seatPercentage = totalSeats > 0 ? (schedule.seatsAvailable / totalSeats) * 100 : 0;
-                        
-                        // Format travel date safely
-                        const formatTravelDate = (dateStr: string | null | undefined) => {
-                          if (!dateStr) return 'N/A';
-                          try {
-                            const date = new Date(dateStr);
-                            if (isNaN(date.getTime())) return 'N/A';
-                            return date.toLocaleDateString('en-US', { 
-                              year: 'numeric', 
-                              month: 'short', 
-                              day: 'numeric' 
-                            });
-                          } catch {
-                            return 'N/A';
-                          }
-                        };
-                        
-                        // Format departure time safely
-                        const formatDepartureTime = (timeStr: string | null | undefined) => {
-                          if (!timeStr) return 'N/A';
-                          try {
-                            const date = new Date(timeStr);
-                            if (isNaN(date.getTime())) return 'N/A';
-                            return date.toLocaleTimeString('en-US', { 
-                              hour: '2-digit', 
-                              minute: '2-digit', 
-                              hour12: true 
-                            });
-                          } catch {
-                            return 'N/A';
-                          }
-                        };
-                        
-                        return (
-                          <Card key={schedule.id} className="hover:shadow-lg transition-shadow border-l-4 border-l-[#0077B6]">
-                            <CardContent className="p-6">
-                              <div className="flex flex-col md:flex-row items-start justify-between gap-4">
-                                <div className="flex-1 space-y-3 w-full">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">Transport Company</p>
-                                      <p className="font-semibold text-lg">{schedule.companyName}</p>
-                                    </div>
-                                    <Badge className={isLowSeats ? "bg-orange-500 text-white" : "bg-[#0077B6] text-white"}>
-                                      {isLowSeats && "⚠️ "}{schedule.seatsAvailable} seat{schedule.seatsAvailable !== 1 ? 's' : ''} left
-                                    </Badge>
-                                  </div>
+                      <div style={{
+                        ...styles.seatsBadge,
+                        background: isLowSeats ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                      }}>
+                        {schedule.seatsAvailable} seats
+                      </div>
+                    </div>
 
-                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">Bus Plate Number</p>
-                                      <p className="font-semibold font-mono text-base">
-                                        {schedule.busPlateNumber && schedule.busPlateNumber !== 'N/A' 
-                                          ? schedule.busPlateNumber 
-                                          : 'Not assigned'}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">Driver Assigned</p>
-                                      <p className="font-semibold flex items-center gap-1">
-                                        <Users className="w-4 h-4" />
-                                        {schedule.driverName && schedule.driverName !== 'No driver assigned'
-                                          ? schedule.driverName
-                                          : <span className="text-muted-foreground italic">No driver assigned</span>}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">Available Seats</p>
-                                      <p className={`font-semibold ${isLowSeats ? 'text-orange-600' : 'text-green-600'}`}>
-                                        {schedule.seatsAvailable} / {totalSeats} seats
-                                      </p>
-                                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mt-1">
-                                        <div 
-                                          className={`h-2 rounded-full transition-all ${
-                                            seatPercentage > 50 ? 'bg-green-500' : 
-                                            seatPercentage > 20 ? 'bg-orange-500' : 
-                                            'bg-red-500'
-                                          }`}
-                                          style={{ width: `${seatPercentage}%` }}
-                                        ></div>
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">Booked Seats</p>
-                                      <p className="font-semibold text-muted-foreground">
-                                        {schedule.bookedSeats} seats
-                                      </p>
-                                    </div>
-                                  </div>
+                    <div style={styles.routeDisplay}>
+                      <div style={styles.cityName}>{schedule.routeFrom}</div>
+                      <ArrowRight style={styles.routeArrow} />
+                      <div style={styles.cityName}>{schedule.routeTo}</div>
+                    </div>
 
-                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">Route</p>
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-semibold">{schedule.routeFrom}</span>
-                                        <ArrowRight className="w-4 h-4 text-[#0077B6]" />
-                                        <span className="font-semibold">{schedule.routeTo}</span>
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">Departure Time</p>
-                                      <p className="font-semibold flex items-center gap-2">
-                                        <Clock className="w-4 h-4 text-[#0077B6]" />
-                                        {formatDepartureTime(schedule.departureTime)}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">Travel Date</p>
-                                      <p className="font-semibold flex items-center gap-2">
-                                        <Calendar className="w-4 h-4 text-[#0077B6]" />
-                                        {formatTravelDate(schedule.scheduleDate || schedule.departureTime)}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div className="text-right space-y-3 min-w-[200px]">
-                                  <div className="bg-[#0077B6]/10 dark:bg-[#0077B6]/20 p-4 rounded-lg">
-                                    <p className="text-sm text-muted-foreground mb-1">Ticket Price</p>
-                                    <p className="text-3xl font-bold text-[#0077B6]" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                                      RWF {schedule.price.toLocaleString()}
-                                    </p>
-                                    <p className="text-xs text-muted-foreground mt-1">per person</p>
-                                  </div>
-                                  
-                                  {selectedSchedule?.id === schedule.id ? (
-                                    <div className="space-y-2">
-                                      <div className="flex items-center gap-2">
-                                        <Label className="text-sm">Tickets:</Label>
-                                        <Input
-                                          type="number"
-                                          min="1"
-                                          max={schedule.seatsAvailable}
-                                          value={numTickets}
-                                          onChange={(e) => setNumTickets(Math.max(1, Math.min(schedule.seatsAvailable, parseInt(e.target.value) || 1)))}
-                                          className="w-20"
-                                        />
-                                      </div>
-                                      <div className="bg-gradient-to-r from-[#27AE60]/10 to-[#27AE60]/5 border-2 border-[#27AE60] p-4 rounded-lg">
-                                        <p className="text-sm text-muted-foreground mb-1">💰 Total Amount to Pay</p>
-                                        <p className="text-2xl font-bold text-[#27AE60]" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                                          RWF {(schedule.price * numTickets).toLocaleString()}
-                                        </p>
-                                        <p className="text-xs text-muted-foreground mt-1">
-                                          {numTickets} ticket{numTickets > 1 ? 's' : ''} × RWF {schedule.price.toLocaleString()}
-                                        </p>
-                                      </div>
-                                      <Button
-                                        className="w-full bg-[#27AE60] hover:bg-[#1e8c4d]"
-                                        onClick={() => setShowPaymentModal(true)}
-                                      >
-                                        <Ticket className="w-4 h-4 mr-2" />
-                                        Book Bus
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <Button
-                                      variant="outline"
-                                      className="w-full"
-                                      onClick={() => navigate(`/schedules/${schedule.id}`)}
-                                    >
-                                      <Ticket className="w-4 h-4 mr-2" />
-                                      Select Seat
-                                    </Button>
-                                  )}
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="tickets">
-            <Card>
-              <CardHeader>
-                <CardTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>My Tickets</CardTitle>
-                <CardDescription>View and manage your bookings</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {tickets.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-8">No tickets booked yet</p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Route</TableHead>
-                        <TableHead>Departure</TableHead>
-                        <TableHead>Seat</TableHead>
-                        <TableHead>Price</TableHead>
-                        <TableHead>Payment Method</TableHead>
-                        <TableHead>Payment Status</TableHead>
-                        <TableHead>Ticket Status</TableHead>
-                        <TableHead>View</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {displayedTickets.map((ticket) => (
-                        <TableRow key={ticket.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-1">
-                              <span className="font-semibold">{ticket.routeFrom}</span>
-                              <ArrowRight className="w-3 h-3 text-muted-foreground" />
-                              <span className="font-semibold">{ticket.routeTo}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm">
-                              {ticket.departureTime && (
-                                <div className="flex items-center gap-1">
-                                  <Clock className="w-3 h-3 text-muted-foreground" />
-                                  {new Date(ticket.departureTime).toLocaleTimeString('en-US', { 
-                                    hour: '2-digit', 
-                                    minute: '2-digit', 
-                                    hour12: true 
-                                  })}
-                                </div>
-                              )}
-                              {ticket.scheduleDate && (
-                                <div className="flex items-center gap-1 mt-1 text-muted-foreground">
-                                  <Calendar className="w-3 h-3" />
-                                  {new Date(ticket.scheduleDate).toLocaleDateString('en-US', { 
-                                    month: 'short', 
-                                    day: 'numeric' 
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell>Seat {ticket.seatNumber}</TableCell>
-                          <TableCell>RWF {ticket.price?.toLocaleString() || '0'}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="capitalize">
-                              {ticket.paymentMethod === 'mobile_money' ? 'MTN MoMo' :
-                               ticket.paymentMethod === 'airtel_money' ? 'Airtel Money' :
-                               ticket.paymentMethod === 'card_payment' ? 'Card' :
-                               ticket.paymentMethod || 'N/A'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge 
-                              className={
-                                ticket.paymentStatus === 'SUCCESS' ? 'bg-[#27AE60] text-white' :
-                                ticket.paymentStatus === 'PENDING' ? 'bg-orange-500 text-white' :
-                                'bg-red-500 text-white'
-                              }
-                            >
-                              {ticket.paymentStatus || 'N/A'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge 
-                              variant={
-                                ticket.status === 'booked' ? 'default' :
-                                ticket.status === 'checked_in' ? 'default' :
-                                ticket.status === 'cancelled' ? 'secondary' :
-                                'outline'
-                              }
-                              className={
-                                ticket.status === 'booked' ? 'bg-[#0077B6] text-white' :
-                                ticket.status === 'checked_in' ? 'bg-[#27AE60] text-white' :
-                                ''
-                              }
-                            >
-                              {ticket.status || 'N/A'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setRecentTicket(ticket)}
-                            >
-                              View
-                            </Button>
-                          </TableCell>
-                          <TableCell className="space-x-2">
-                            {ticket.status !== 'cancelled' && !ticket.scanned && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleCancelTicket(ticket.id)}
-                              >
-                                Cancel
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      {hasMoreTickets && (
-                        <TableRow>
-                          <TableCell colSpan={9} className="text-center">
-                            {showAllTickets ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setShowAllTickets(false)}
-                              >
-                                See Less
-                              </Button>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setShowAllTickets(true)}
-                              >
-                                See More
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="track">
-            <Card>
-              <CardHeader>
-                <CardTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>Live Bus Tracking</CardTitle>
-                <CardDescription>Real-time locations of buses</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {locations.length === 0 ? (
-                    <p className="text-center text-muted-foreground py-8">No buses tracking at the moment</p>
-                  ) : (
-                    locations.map((loc) => (
-                      <div key={loc.busId} className="border rounded-lg p-4">
-                        <div className="flex items-start gap-3">
-                          <MapPin className="w-5 h-5 text-[#0077B6] mt-0.5" />
-                          <div className="flex-1">
-                            <p>Bus ID: {loc.busId.slice(0, 8)}</p>
-                            <p className="text-sm text-muted-foreground">
-                              Latitude: {loc.lat.toFixed(6)}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              Longitude: {loc.lng.toFixed(6)}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Last updated: {new Date(loc.timestamp).toLocaleString()}
-                            </p>
+                    <div style={styles.infoGrid}>
+                      <div style={styles.infoItem}>
+                        <div style={styles.infoIconBox}>
+                          <Calendar style={{ width: '20px', height: '20px' }} />
+                        </div>
+                        <div style={styles.infoText}>
+                          <div style={styles.infoLabel}>Date</div>
+                          <div style={styles.infoValue}>
+                            {schedule.scheduleDate 
+                              ? new Date(schedule.scheduleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                              : 'Today'}
                           </div>
                         </div>
                       </div>
-                    ))
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+                      <div style={styles.infoItem}>
+                        <div style={styles.infoIconBox}>
+                          <Clock style={{ width: '20px', height: '20px' }} />
+                        </div>
+                        <div style={styles.infoText}>
+                          <div style={styles.infoLabel}>Departure</div>
+                          <div style={styles.infoValue}>
+                            {schedule.departureTime 
+                              ? new Date(schedule.departureTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+                              : 'N/A'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
 
-          <TabsContent value="settings">
-            <Card>
-              <CardHeader>
-                <CardTitle style={{ fontFamily: 'Montserrat, sans-serif' }}>Account Settings</CardTitle>
-                <CardDescription>Manage your profile, security, and preferences</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <CommuterSettings />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+                    <div style={styles.priceRow}>
+                      <div style={styles.priceBox}>
+                        <div style={styles.priceLabel}>Price per seat</div>
+                        <div style={styles.priceAmount}>
+                          RWF {schedule.price.toLocaleString()}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => navigate(`/app/schedules/${schedule.id}`)}
+                        style={styles.bookButton}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'scale(1.05)';
+                          e.currentTarget.style.boxShadow = '0 12px 32px rgba(102,126,234,0.4)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'scale(1)';
+                          e.currentTarget.style.boxShadow = '0 8px 24px rgba(102,126,234,0.3)';
+                        }}
+                      >
+                        Book Now →
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </>
+        )}
+
+        {/* Other Tabs */}
+        {activeTab === 'tickets' && (
+          <div style={{ marginTop: '20px' }}>
+            {activeTickets.length === 0 ? (
+              <div style={styles.emptyState}>
+                <div style={styles.emptyIllustration}>
+                  <Ticket style={{ width: '60px', height: '60px', color: 'white' }} />
+                </div>
+                <div style={styles.emptyTitle}>No Tickets</div>
+                <div style={styles.emptyText}>Your tickets will appear here</div>
+              </div>
+            ) : (
+              activeTickets.map((ticket) => (
+                <div key={ticket.id} style={styles.ticketCard}>
+                  <div style={styles.ticketPattern} />
+                  <div style={styles.ticketHeader}>
+                    <div>
+                      <div style={styles.ticketRoute}>
+                        {ticket.routeFrom} → {ticket.routeTo}
+                      </div>
+                    </div>
+                    <div style={styles.seatBadge}>Seat {ticket.seatNumber}</div>
+                  </div>
+                  <div style={styles.ticketInfo}>
+                    <div style={styles.ticketInfoItem}>
+                      <div style={styles.ticketLabel}>Date</div>
+                      <div style={styles.ticketValue}>
+                        {ticket.scheduleDate 
+                          ? new Date(ticket.scheduleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                          : 'N/A'}
+                      </div>
+                    </div>
+                    <div style={styles.ticketInfoItem}>
+                      <div style={styles.ticketLabel}>Time</div>
+                      <div style={styles.ticketValue}>
+                        {ticket.departureTime 
+                          ? new Date(ticket.departureTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+                          : 'N/A'}
+                      </div>
+                    </div>
+                    <div style={styles.ticketInfoItem}>
+                      <div style={styles.ticketLabel}>Price</div>
+                      <div style={styles.ticketValue}>
+                        RWF {ticket.price?.toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', position: 'relative', zIndex: 1 }}>
+                    <Button
+                      onClick={() => setRecentTicket(ticket)}
+                      style={{ background: 'white', color: SAFARITIX.primary, fontWeight: '600', padding: '12px', borderRadius: '12px' }}
+                    >
+                      View QR
+                    </Button>
+                    <Button
+                      onClick={() => handleCancelTicket(ticket.id)}
+                      style={{ background: 'rgba(255,255,255,0.15)', color: 'white', fontWeight: '600', padding: '12px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.3)' }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {activeTab === 'track' && (
+          <div style={{ marginTop: '20px' }}>
+            {locations.length === 0 ? (
+              <div style={styles.emptyState}>
+                <div style={styles.emptyIllustration}>
+                  <MapPin style={{ width: '60px', height: '60px', color: 'white' }} />
+                </div>
+                <div style={styles.emptyTitle}>No Live Buses</div>
+                <div style={styles.emptyText}>Tracking will appear when buses are active</div>
+              </div>
+            ) : (
+              locations.map((loc) => (
+                <div key={loc.busId} style={{ ...styles.searchCard, marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', gap: '16px' }}>
+                    <div style={{
+                      width: '60px',
+                      height: '60px',
+                      borderRadius: '16px',
+                      background: `linear-gradient(135deg, ${SAFARITIX.primary} 0%, ${SAFARITIX.primaryDark} 100%)`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'white',
+                    }}>
+                      <Bus style={{ width: '30px', height: '30px' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>
+                        Bus {loc.busId.slice(0, 8)}
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#6b7280' }}>
+                        Lat: {loc.lat.toFixed(6)} • Lng: {loc.lng.toFixed(6)}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
+                        Updated: {new Date(loc.timestamp).toLocaleTimeString()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {activeTab === 'profile' && (
+          <div style={{ ...styles.searchCard, marginTop: '20px' }}>
+            <CommuterSettings />
+          </div>
+        )}
       </div>
 
-      {/* Payment Modal */}
+      {/* Bottom Nav */}
+      <div style={styles.bottomNav}>
+        <div style={styles.navContent}>
+          <button
+            style={{
+              ...styles.navItem,
+              ...(activeTab === 'home' ? styles.navItemActive : styles.navItemInactive),
+            }}
+            onClick={() => setActiveTab('home')}
+          >
+            <Search style={{ width: '22px', height: '22px' }} />
+            <span style={styles.navLabel}>Home</span>
+          </button>
+          <button
+            style={{
+              ...styles.navItem,
+              ...(activeTab === 'tickets' ? styles.navItemActive : styles.navItemInactive),
+            }}
+            onClick={() => setActiveTab('tickets')}
+          >
+            <Ticket style={{ width: '22px', height: '22px' }} />
+            <span style={styles.navLabel}>Tickets</span>
+          </button>
+          <button
+            style={{
+              ...styles.navItem,
+              ...(activeTab === 'track' ? styles.navItemActive : styles.navItemInactive),
+            }}
+            onClick={() => setActiveTab('track')}
+          >
+            <MapPin style={{ width: '22px', height: '22px' }} />
+            <span style={styles.navLabel}>Track</span>
+          </button>
+          <button
+            style={{
+              ...styles.navItem,
+              ...(activeTab === 'profile' ? styles.navItemActive : styles.navItemInactive),
+            }}
+            onClick={() => setActiveTab('profile')}
+          >
+            <Star style={{ width: '22px', height: '22px' }} />
+            <span style={styles.navLabel}>Profile</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Modals */}
       {selectedSchedule && (
         <PaymentModal
           open={showPaymentModal}
@@ -790,49 +1145,37 @@ export function CommuterDashboard({ onSettings }: CommuterDashboardProps) {
           scheduleId={selectedSchedule.id}
           numTickets={numTickets}
           onSuccess={handlePaymentSuccess}
-          title="Complete Your Booking"
+          title="Complete Booking"
           description={`Pay for ${numTickets} ticket${numTickets > 1 ? 's' : ''}`}
           busDetails={{
             route: `${selectedSchedule.routeFrom} → ${selectedSchedule.routeTo}`,
             date: selectedSchedule.scheduleDate 
               ? new Date(selectedSchedule.scheduleDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-              : selectedSchedule.departureTime 
-                ? new Date(selectedSchedule.departureTime).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-                : 'N/A',
+              : 'N/A',
             time: selectedSchedule.departureTime 
-              ? new Date(selectedSchedule.departureTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+              ? new Date(selectedSchedule.departureTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
               : 'N/A',
             company: selectedSchedule.companyName || 'N/A'
           }}
         />
       )}
 
-      {/* Success Modal */}
-      {showSuccessModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-md m-4">
-            <CardContent className="text-center py-12">
-              <div className="bg-[#27AE60] text-white w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-                <Check className="w-10 h-10" />
-              </div>
-              <h2 className="text-3xl font-bold mb-4" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                Booked Successfully!
-              </h2>
-              <p className="text-muted-foreground mb-2">
-                Your {numTickets} ticket{numTickets > 1 ? 's have' : ' has'} been booked.
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Check "My Tickets" tab for your QR codes.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Ticket View Modal */}
-      {recentTicket && !showSuccessModal && (
+      {recentTicket && (
         <TicketDisplay ticket={recentTicket} onClose={() => setRecentTicket(null)} />
       )}
+
+      {/* Animations */}
+      <style>
+        {`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+          @keyframes float {
+            0%, 100% { transform: translateY(0) translateX(0); }
+            50% { transform: translateY(-20px) translateX(20px); }
+          }
+        `}
+      </style>
     </div>
   );
 }

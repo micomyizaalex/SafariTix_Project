@@ -1,3 +1,9 @@
+const SAFARITIX = {
+  primary: '#0077B6',
+  primaryDark: '#005F8E',
+  primarySoft: '#E6F4FB',
+};
+
 import React, { useState, CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -111,7 +117,7 @@ export default function SignupPage() {
     logoIcon: {
       width: '40px',
       height: '40px',
-      background: '#0077B6',
+      background: SAFARITIX.primary,
       borderRadius: '12px',
       display: 'flex',
       alignItems: 'center',
@@ -216,21 +222,21 @@ export default function SignupPage() {
       width: '18px',
       height: '18px',
       cursor: 'pointer',
-      accentColor: '#0077B6',
+      accentColor: SAFARITIX.primary,
     },
     checkboxLabel: {
       fontSize: '14px',
       color: '#6b7280',
     },
     link: {
-      color: '#0077B6',
+      color: SAFARITIX.primary,
       textDecoration: 'none',
       fontWeight: '500',
     },
     submitBtn: {
       width: '100%',
       padding: '14px',
-      background: '#0077B6',
+      background: SAFARITIX.primary,
       color: 'white',
       border: 'none',
       borderRadius: '12px',
@@ -248,7 +254,7 @@ export default function SignupPage() {
     // Right Side - Info Panel
     rightSide: {
       flex: 1,
-      background: 'linear-gradient(135deg, #0077B6 0%, #0096c7 100%)',
+      background: `linear-gradient(135deg, ${SAFARITIX.primary} 0%, ${SAFARITIX.primaryDark} 100%)`,
       padding: '60px',
       color: 'white',
       display: 'flex',
@@ -434,7 +440,7 @@ export default function SignupPage() {
                 value={signupName}
                 onChange={(e) => setSignupName(e.target.value)}
                 style={styles.input}
-                onFocus={(e) => e.currentTarget.style.borderColor = '#0077B6'}
+                onFocus={(e) => e.currentTarget.style.borderColor = SAFARITIX.primary}
                 onBlur={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
                 required
               />
@@ -449,7 +455,7 @@ export default function SignupPage() {
                 value={signupEmail}
                 onChange={(e) => setSignupEmail(e.target.value)}
                 style={styles.input}
-                onFocus={(e) => e.currentTarget.style.borderColor = '#0077B6'}
+                onFocus={(e) => e.currentTarget.style.borderColor = SAFARITIX.primary}
                 onBlur={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
                 required
               />
@@ -465,7 +471,7 @@ export default function SignupPage() {
                   value={signupPassword}
                   onChange={(e) => setSignupPassword(e.target.value)}
                   style={styles.input}
-                  onFocus={(e) => e.currentTarget.style.borderColor = '#0077B6'}
+                  onFocus={(e) => e.currentTarget.style.borderColor = SAFARITIX.primary}
                   onBlur={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
                   required
                 />
@@ -504,7 +510,7 @@ export default function SignupPage() {
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
                   style={styles.input}
-                  onFocus={(e) => e.currentTarget.style.borderColor = '#0077B6'}
+                  onFocus={(e) => e.currentTarget.style.borderColor = SAFARITIX.primary}
                   onBlur={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
                   required
                 />
@@ -533,8 +539,8 @@ export default function SignupPage() {
               type="submit"
               style={styles.submitBtn}
               disabled={isLoading}
-              onMouseEnter={(e) => !isLoading && (e.currentTarget.style.background = '#005a8c')}
-              onMouseLeave={(e) => !isLoading && (e.currentTarget.style.background = '#0077B6')}
+              onMouseEnter={(e) => !isLoading && (e.currentTarget.style.background = SAFARITIX.primaryDark)}
+              onMouseLeave={(e) => !isLoading && (e.currentTarget.style.background = SAFARITIX.primary)}
             >
               {isLoading ? 'Creating account...' : 'Sign Up'}
             </button>
