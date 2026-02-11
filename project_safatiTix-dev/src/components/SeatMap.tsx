@@ -1,379 +1,421 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from 'react';
+import { User, Loader2 } from 'lucide-react';
+import { useAuth } from './AuthContext';
 
-// SafariTix Dynamic Bus Seat Map
-// Renders EXACTLY the number of seats based on bus capacity
-// Layout: Driver (front-left) + Passenger (front-right) + Rows of 4 seats (2-2 with aisle)
+type SeatState = 'AVAILABLE' | 'LOCKED' | 'BOOKED';
 
-enum SeatStatus {
-  AVAILABLE = "available",
-  SELECTED = "selected",
-  BOOKED = "booked",
-}
+type Seat = {
+  id?: number | string;
+  seat_number: string;
+  row?: number;
+  col?: number;
+  side?: 'L' | 'R' | 'l' | 'r';
+  state: SeatState;
+  lock_expires_at?: string | null;
+};
 
-interface Seat {
-  id: number;
-  seatNumber: string;
-  status: SeatStatus;
-  isDriver?: boolean;
-}
+type SeatMapProps = {
+  scheduleId: string | number;
+  price?: number;
+  className?: string;
+  onBooked?: (result: any) => void;
+};
 
-interface BusSeatMapProps {
-  capacity?: number; // Total bus capacity (default: 30)
-  bookedSeats?: number[]; // Array of pre-booked seat IDs
-  onSeatSelect?: (seat: Seat) => void;
-}
+export default function SeatMap({ scheduleId, price = 0, className = '', onBooked }: SeatMapProps) {
+  const { user, accessToken } = useAuth();
+  const [seats, setSeats] = useState<Seat[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [locking, setLocking] = useState(false);
+  const [result, setResult] = useState<any>(null);
 
-export default function BusSeatMap({ 
-  capacity = 30, 
-  bookedSeats = [1, 5, 12, 18],
-  onSeatSelect 
-}: BusSeatMapProps): JSX.Element {
-  
-  // Generate seats dynamically based on capacity
-  const generateSeats = (): Seat[] => {
-    const seats: Seat[] = [];
-    
-    // Seat 1: Driver (not selectable)
-    seats.push({
-      id: 1,
-      seatNumber: "DRIVER",
-      status: SeatStatus.BOOKED,
-      isDriver: true
-    });
-    
-    // Remaining seats for passengers
-    for (let i = 2; i <= capacity; i++) {
-      seats.push({
-        id: i,
-        seatNumber: `${i}`,
-        status: bookedSeats.includes(i) ? SeatStatus.BOOKED : SeatStatus.AVAILABLE,
-        isDriver: false
-      });
+  const fetchSeats = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const hdrs: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (accessToken) hdrs['Authorization'] = `Bearer ${accessToken}`;
+      const res = await fetch(`/api/seats/schedules/${scheduleId}`, { headers: hdrs });
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || `Failed to load seats (${res.status})`);
+      }
+      if (!ct.includes('application/json')) {
+        throw new Error('Seat endpoint returned non-JSON response');
+      }
+      const json = await res.json();
+      const returned: Seat[] = Array.isArray(json.seats) ? json.seats : json.seats || [];
+      
+      const seatMap = new Map<string, Seat>();
+      returned.forEach((s) => seatMap.set(String(s.seat_number), s));
+
+      const organized: Seat[] = [];
+      
+      for (let i = 1; i <= 29; i++) {
+        const seatNum = String(i);
+        const existing = seatMap.get(seatNum);
+        
+        if (existing) {
+          organized.push(existing);
+        } else {
+          organized.push({
+            seat_number: seatNum,
+            state: 'BOOKED'
+          } as Seat);
+        }
+      }
+
+      setSeats(organized);
+    } catch (err: any) {
+      console.error('fetchSeats error', err);
+      setError(err.message || 'Failed to load seats');
+      
+      const fallback: Seat[] = [];
+      for (let i = 1; i <= 29; i++) {
+        fallback.push({ seat_number: String(i), state: 'BOOKED' } as Seat);
+      }
+      setSeats(fallback);
+    } finally {
+      setLoading(false);
     }
-    
-    return seats;
   };
 
-  const [seats, setSeats] = useState<Seat[]>(generateSeats());
+  useEffect(() => {
+    if (!scheduleId) return;
+    fetchSeats();
+  }, [scheduleId, accessToken]);
 
-  const toggleSeat = (seat: Seat): void => {
-    if (seat.isDriver || seat.status === SeatStatus.BOOKED) return;
-    
-    setSeats((prev) =>
-      prev.map((s) => {
-        if (s.id !== seat.id) return s;
-        const newStatus = s.status === SeatStatus.SELECTED 
-          ? SeatStatus.AVAILABLE 
-          : SeatStatus.SELECTED;
-        const updatedSeat = { ...s, status: newStatus };
-        
-        if (onSeatSelect && newStatus === SeatStatus.SELECTED) {
-          onSeatSelect(updatedSeat);
+  const toggleSelect = (seatNum: string, seatState: SeatState) => {
+    if (seatState !== 'AVAILABLE') return;
+    setSelected((s) => ({ ...s, [seatNum]: !s[seatNum] }));
+  };
+
+  const handleKey = (e: React.KeyboardEvent, seatNum: string, state: SeatState) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggleSelect(seatNum, state);
+    }
+  };
+
+  const confirmBooking = async () => {
+    const picks = Object.keys(selected).filter(k => selected[k]);
+    if (picks.length === 0) {
+      setError('Select at least one seat');
+      return;
+    }
+    setError(null);
+    setLocking(true);
+    const results: any[] = [];
+    const errs: string[] = [];
+    try {
+      const hdrs: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (accessToken) hdrs['Authorization'] = `Bearer ${accessToken}`;
+      for (const seatNum of picks) {
+        const body = { seat_number: seatNum, passenger_id: user?.id, price };
+        try {
+          const res = await fetch(`/api/seats/schedules/${scheduleId}/lock`, {
+            method: 'POST',
+            headers: hdrs,
+            body: JSON.stringify(body)
+          });
+          if (!res.ok) {
+            const txt = await res.text();
+            errs.push(`Seat ${seatNum}: ${txt || res.statusText}`);
+            continue;
+          }
+          const json = await res.json();
+          results.push({ seat: seatNum, ...json });
+        } catch (err: any) {
+          errs.push(`Seat ${seatNum}: ${err.message || 'Failed'}`);
         }
-        
-        return updatedSeat;
-      })
+      }
+
+      if (errs.length > 0) {
+        setError(errs.join('; '));
+      }
+      setResult({ results, errors: errs });
+      if (onBooked) onBooked({ results, errors: errs });
+      
+      await fetchSeats();
+      
+      const successSeats = results.map((r) => String(r.ticket_id || r.lock_id || r.seat_number));
+      setSelected((prev) => {
+        const copy = { ...prev };
+        for (const s of successSeats) delete copy[s];
+        return copy;
+      });
+    } finally {
+      setLocking(false);
+    }
+  };
+
+  const layout = useMemo(() => {
+    const seatsByNum = new Map<number, Seat>();
+    seats.forEach(s => seatsByNum.set(parseInt(s.seat_number), s));
+
+    return {
+      frontRight: seatsByNum.get(1),
+      rows: [
+        { left: [2, 3], right: [4, 5] },
+        { left: [6, 7], right: [8, 9] },
+        { left: [10, 11], right: [12, 13] },
+        { left: [14, 15], right: [16, 17] },
+        { left: [18, 19], right: [20, 21] },
+        { left: [22, 23], right: [24, 25] },
+        { left: [26, 27], right: [28, 29] },
+      ].map(row => ({
+        left: row.left.map(n => seatsByNum.get(n)).filter(Boolean) as Seat[],
+        right: row.right.map(n => seatsByNum.get(n)).filter(Boolean) as Seat[],
+      }))
+    };
+  }, [seats]);
+
+  const selectedSeats = Object.keys(selected).filter(k => selected[k]);
+  const selectedCount = selectedSeats.length;
+  const totalPrice = selectedCount * price;
+
+  const renderSeat = (seat: Seat | undefined) => {
+    if (!seat) return null;
+    
+    const id = String(seat.seat_number);
+    const st = seat.state;
+    const isSelected = !!selected[id];
+    
+    return (
+      <button
+        key={id}
+        onClick={() => toggleSelect(id, st)}
+        onKeyDown={(e) => handleKey(e, id, st)}
+        disabled={st !== 'AVAILABLE'}
+        aria-pressed={isSelected}
+        aria-label={`Seat ${id} ${st.toLowerCase()}`}
+        className={`
+          w-full aspect-square rounded-lg flex items-center justify-center
+          font-bold text-xs transition-all duration-150
+          ${st === 'BOOKED'
+            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            : st === 'LOCKED'
+            ? 'bg-yellow-100 border-2 border-yellow-400 text-yellow-700 cursor-not-allowed'
+            : isSelected
+            ? 'bg-[#0077B6] text-white shadow-md scale-105 ring-1 ring-[#0077B6]/30'
+            : 'bg-white text-gray-900 border-2 border-gray-200 hover:border-[#0077B6] hover:shadow-sm hover:scale-105 active:scale-95'
+          }
+        `}
+      >
+        {id}
+      </button>
     );
   };
 
-  // Calculate layout: Front row (driver + 1 passenger) + remaining rows (4 seats per row: 2-2)
-  const driver = seats[0];
-  const frontPassenger = seats[1]; // Seat 2 next to driver
-  const remainingSeats = seats.slice(2); // Seats 3 onwards
-  const seatsPerRow = 4;
-  
-  // Organize remaining seats into rows of 4
-  const rows: Seat[][] = [];
-  for (let i = 0; i < remainingSeats.length; i += seatsPerRow) {
-    rows.push(remainingSeats.slice(i, i + seatsPerRow));
-  }
-
-  const selectedSeats = seats.filter((s) => s.status === SeatStatus.SELECTED && !s.isDriver);
-  const totalPrice = selectedSeats.length * 3500;
-
   return (
-    <div style={{
-      padding: "20px",
-      background: "#f9fafb",
-      borderRadius: "16px",
-      maxWidth: "900px",
-      margin: "0 auto"
-    }}>
-      {/* Bus Container */}
-      <div style={{
-        background: "white",
-        borderRadius: "24px",
-        padding: "32px 24px",
-        boxShadow: "0 10px 40px rgba(0,0,0,0.08)"
-      }}>
-        {/* Capacity Info */}
-        <div style={{
-          textAlign: "center",
-          marginBottom: "24px",
-          paddingBottom: "16px",
-          borderBottom: "2px solid #e5e7eb"
-        }}>
-          <div style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            background: "#E8F7FF",
-            padding: "8px 16px",
-            borderRadius: "20px"
-          }}>
-            <span style={{ fontSize: "14px", fontWeight: "600", color: "#0077B6" }}>
-              🚌 Bus Capacity: {capacity} seats
-            </span>
+    <div className={`w-full max-w-md mx-auto ${className}`}>
+      {/* Header - ULTRA COMPACT */}
+      <div className="bg-gradient-to-br from-[#0077B6] to-[#005F8E] rounded-t-xl p-2 text-white">
+        <h3 className="text-sm font-bold mb-2 flex items-center gap-1.5">
+          <div className="w-6 h-6 bg-white/20 rounded-md flex items-center justify-center text-xs">
+            🚌
           </div>
-        </div>
-
-        {/* Bus Structure */}
-        <div style={{
-          position: "relative",
-          background: "linear-gradient(180deg, #f3f4f6 0%, #e5e7eb 100%)",
-          borderRadius: "80px 80px 24px 24px",
-          padding: "28px 20px",
-          border: "6px solid #d1d5db",
-          boxShadow: "inset 0 2px 8px rgba(0,0,0,0.05)"
-        }}>
-          {/* Windshield */}
-          <div style={{
-            position: "absolute",
-            top: "-2px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            width: "120px",
-            height: "70px",
-            background: "linear-gradient(180deg, #DBEAFE 0%, #BFDBFE 100%)",
-            borderRadius: "60px 60px 0 0",
-            border: "4px solid #d1d5db",
-            borderBottom: "none",
-            opacity: 0.7
-          }} />
-
-          {/* Front Row: Driver + Front Passenger */}
-          <div style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: "48px",
-            marginBottom: "32px",
-            marginTop: "48px"
-          }}>
-            {/* Driver Seat (Left) */}
-            <div style={{
-              width: "72px",
-              height: "64px",
-              background: "linear-gradient(135deg, #6b7280 0%, #4b5563 100%)",
-              border: "3px solid #374151",
-              borderRadius: "12px",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-              cursor: "not-allowed",
-              opacity: 0.8
-            }}>
-              <span style={{ fontSize: "20px", marginBottom: "2px" }}>🚗</span>
-              <span style={{ fontSize: "10px", fontWeight: "bold", color: "white" }}>DRIVER</span>
-            </div>
-
-            {/* Front Passenger Seat (Right) */}
-            {frontPassenger && (
-              <SeatComponent seat={frontPassenger} onClick={() => toggleSeat(frontPassenger)} />
-            )}
+          Select Seat
+        </h3>
+        
+        <div className="grid grid-cols-4 gap-1 text-[10px]">
+          <div className="flex items-center gap-1 bg-white/10 rounded p-1">
+            <div className="w-3 h-3 rounded bg-white"></div>
+            <span>Free</span>
           </div>
-
-          {/* Passenger Rows (2-aisle-2 configuration) */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            {rows.map((row, rowIdx) => (
-              <div key={rowIdx} style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "12px"
-              }}>
-                {/* Left Side Seats */}
-                <div style={{ display: "flex", gap: "10px" }}>
-                  {row[0] && <SeatComponent seat={row[0]} onClick={() => toggleSeat(row[0])} />}
-                  {row[1] && <SeatComponent seat={row[1]} onClick={() => toggleSeat(row[1])} />}
-                </div>
-
-                {/* Aisle */}
-                <div style={{
-                  width: "40px",
-                  height: "2px",
-                  background: "linear-gradient(90deg, transparent 0%, #d1d5db 50%, transparent 100%)"
-                }} />
-
-                {/* Right Side Seats */}
-                <div style={{ display: "flex", gap: "10px" }}>
-                  {row[2] && <SeatComponent seat={row[2]} onClick={() => toggleSeat(row[2])} />}
-                  {row[3] && <SeatComponent seat={row[3]} onClick={() => toggleSeat(row[3])} />}
-                </div>
-              </div>
-            ))}
+          <div className="flex items-center gap-1 bg-white/10 rounded p-1">
+            <div className="w-3 h-3 rounded bg-[#0077B6] border border-white"></div>
+            <span>Pick</span>
           </div>
-
-          {/* Bus Rear */}
-          <div style={{
-            marginTop: "24px",
-            height: "20px",
-            background: "linear-gradient(90deg, #9ca3af 0%, #6b7280 50%, #9ca3af 100%)",
-            borderRadius: "0 0 12px 12px",
-            boxShadow: "inset 0 -2px 4px rgba(0,0,0,0.2)"
-          }} />
-        </div>
-
-        {/* Legend */}
-        <div style={{
-          marginTop: "28px",
-          paddingTop: "20px",
-          borderTop: "1px solid #e5e7eb",
-          display: "flex",
-          justifyContent: "center",
-          gap: "32px",
-          flexWrap: "wrap"
-        }}>
-          <LegendItem color="#0077B6" label="Available" />
-          <LegendItem color="#005a8c" label="Selected" />
-          <LegendItem color="#9ca3af" label="Booked" />
+          <div className="flex items-center gap-1 bg-white/10 rounded p-1">
+            <div className="w-3 h-3 rounded bg-gray-400"></div>
+            <span>Taken</span>
+          </div>
+          <div className="flex items-center gap-1 bg-white/10 rounded p-1">
+            <div className="w-3 h-3 rounded bg-yellow-400"></div>
+            <span>Lock</span>
+          </div>
         </div>
       </div>
 
-      {/* Booking Summary */}
-      {selectedSeats.length > 0 && (
-        <div style={{
-          marginTop: "20px",
-          background: "linear-gradient(135deg, #0077B6 0%, #0096D6 100%)",
-          borderRadius: "20px",
-          padding: "24px",
-          color: "white",
-          boxShadow: "0 10px 30px rgba(0,119,182,0.3)"
-        }}>
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: "16px"
-          }}>
-            <div>
-              <p style={{ fontSize: "13px", opacity: 0.9, margin: "0 0 6px 0" }}>
-                Selected Seats
-              </p>
-              <p style={{ fontSize: "24px", fontWeight: "700", margin: "0", fontFamily: "Montserrat, sans-serif" }}>
-                {selectedSeats.map((s) => s.seatNumber).join(", ")}
-              </p>
+      {/* Bus Interior - ULTRA COMPACT */}
+      <div className="bg-gradient-to-b from-gray-50 to-white rounded-b-xl shadow-lg border-x-2 border-b-2 border-gray-300">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-8">
+            <Loader2 className="w-8 h-8 text-[#0077B6] animate-spin mb-2" />
+            <p className="text-gray-600 text-xs">Loading...</p>
+          </div>
+        ) : (
+          <div className="p-2.5">
+            {/* Windshield */}
+            <div className="mb-2">
+              <div className="h-1.5 bg-gradient-to-r from-blue-100 via-blue-200 to-blue-100 rounded-t-full mx-4"></div>
             </div>
-            <div style={{ textAlign: "right" }}>
-              <p style={{ fontSize: "13px", opacity: 0.9, margin: "0 0 6px 0" }}>
-                Total Amount
-              </p>
-              <p style={{ fontSize: "32px", fontWeight: "700", margin: "0", fontFamily: "Montserrat, sans-serif" }}>
-                RWF {totalPrice.toLocaleString()}
-              </p>
+
+            {/* Front Row - Driver + Seat 1 */}
+            <div className="mb-2.5">
+              <div className="flex items-center gap-2 justify-center">
+                {/* Driver */}
+                <div className="w-11">
+                  <div className="w-full aspect-square bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg flex items-center justify-center shadow-md border border-gray-700">
+                    <User className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="text-center text-[9px] font-semibold text-gray-600 mt-0.5">
+                    Driver
+                  </div>
+                </div>
+
+                {/* Aisle */}
+                <div className="w-12 h-11 flex items-center justify-center">
+                  <div className="w-px h-full bg-gray-300"></div>
+                </div>
+
+                {/* Seat 1 */}
+                <div className="w-11">
+                  {renderSeat(layout.frontRight)}
+                </div>
+              </div>
+            </div>
+
+            {/* Passenger Rows - TIGHTER */}
+            <div className="space-y-1.5">
+              {layout.rows.map((row, idx) => (
+                <div key={idx} className="flex items-center gap-2 justify-center">
+                  {/* Left Seats */}
+                  <div className="flex gap-1">
+                    {row.left.map(seat => (
+                      <div key={seat.seat_number} className="w-11">
+                        {renderSeat(seat)}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Aisle */}
+                  <div className="w-12 h-11 flex items-center justify-center">
+                    <div className="w-px h-full bg-gray-300"></div>
+                  </div>
+
+                  {/* Right Seats */}
+                  <div className="flex gap-1">
+                    {row.right.map(seat => (
+                      <div key={seat.seat_number} className="w-11">
+                        {renderSeat(seat)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Bus Back */}
+            <div className="mt-2">
+              <div className="h-2 bg-gradient-to-b from-gray-300 to-gray-400 rounded-b-lg mx-4"></div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Selection Summary - ULTRA COMPACT */}
+      {selectedCount > 0 && (
+        <div className="mt-2.5 bg-gradient-to-br from-[#0077B6] to-[#005F8E] rounded-lg p-2.5 text-white shadow-lg">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] opacity-90 mb-0.5">Seats</div>
+              <div className="text-sm font-bold mb-0.5 truncate">{selectedSeats.join(', ')}</div>
+              <div className="text-xs">
+                <span className="font-bold">RWF {totalPrice.toLocaleString()}</span>
+              </div>
+            </div>
+            
+            <div className="flex gap-1.5">
+              <button
+                onClick={() => setSelected({})}
+                className="bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold hover:bg-white/30 transition-all border border-white/30"
+              >
+                Clear
+              </button>
+              <button
+                onClick={confirmBooking}
+                disabled={locking}
+                className="bg-white text-[#0077B6] px-4 py-1.5 rounded-md text-xs font-bold shadow-md hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                {locking ? (
+                  <>
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Wait...
+                  </>
+                ) : (
+                  'Book'
+                )}
+              </button>
             </div>
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
-// Individual Seat Component
-function SeatComponent({ seat, onClick }: { seat: Seat; onClick: () => void }): JSX.Element {
-  const getStyles = (): React.CSSProperties => {
-    const base: React.CSSProperties = {
-      width: "64px",
-      height: "56px",
-      borderRadius: "10px",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      fontWeight: "700",
-      fontSize: "16px",
-      transition: "all 0.2s",
-      cursor: "pointer",
-      border: "3px solid",
-      boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
-      position: "relative"
-    };
-
-    if (seat.status === SeatStatus.AVAILABLE) {
-      return {
-        ...base,
-        background: "#0077B6",
-        borderColor: "#005a8c",
-        color: "white"
-      };
-    } else if (seat.status === SeatStatus.SELECTED) {
-      return {
-        ...base,
-        background: "#005a8c",
-        borderColor: "#003d5c",
-        color: "white",
-        transform: "scale(1.05)",
-        boxShadow: "0 6px 16px rgba(0,119,182,0.4), 0 0 0 4px rgba(0,119,182,0.2)"
-      };
-    } else {
-      return {
-        ...base,
-        background: "#9ca3af",
-        borderColor: "#6b7280",
-        color: "#4b5563",
-        cursor: "not-allowed",
-        opacity: 0.6
-      };
-    }
-  };
-
-  return (
-    <div
-      onClick={onClick}
-      style={getStyles()}
-      title={seat.status === SeatStatus.BOOKED ? "Seat Booked" : `Seat ${seat.seatNumber}`}
-    >
-      <span style={{ position: "relative", zIndex: 10 }}>{seat.seatNumber}</span>
-      {seat.status === SeatStatus.SELECTED && (
-        <div style={{
-          position: "absolute",
-          top: "-8px",
-          right: "-8px",
-          width: "20px",
-          height: "20px",
-          background: "#27AE60",
-          borderRadius: "50%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: "12px",
-          border: "2px solid white"
-        }}>
-          ✓
+      {/* Refresh - ULTRA COMPACT */}
+      {!selectedCount && !loading && (
+        <div className="mt-2.5 flex justify-center">
+          <button
+            onClick={fetchSeats}
+            className="bg-gray-100 text-gray-900 px-3 py-1.5 rounded-md text-xs font-semibold hover:bg-gray-200 transition-all flex items-center gap-1.5"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
         </div>
       )}
-    </div>
-  );
-}
 
-// Legend Item
-function LegendItem({ color, label }: { color: string; label: string }): JSX.Element {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-      <div style={{
-        width: "32px",
-        height: "32px",
-        borderRadius: "8px",
-        background: color,
-        border: "2px solid #d1d5db",
-        boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
-      }} />
-      <span style={{
-        fontSize: "14px",
-        fontWeight: "600",
-        color: "#374151"
-      }}>{label}</span>
+      {/* Messages - ULTRA COMPACT */}
+      {error && (
+        <div className="mt-2.5 bg-red-50 border border-red-200 rounded-lg p-2">
+          <div className="flex items-start gap-1.5">
+            <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0">
+              <span className="text-white text-[10px] font-bold">!</span>
+            </div>
+            <div>
+              <div className="font-semibold text-red-900 text-xs">Error</div>
+              <div className="text-[10px] text-red-700">{error}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {result && result.errors && result.errors.length > 0 && (
+        <div className="mt-2 bg-yellow-50 border border-yellow-200 rounded-lg p-2">
+          <div className="flex items-start gap-1.5">
+            <div className="w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center flex-shrink-0">
+              <span className="text-white text-[10px] font-bold">!</span>
+            </div>
+            <div>
+              <div className="font-semibold text-yellow-900 text-xs">Warning</div>
+              <div className="text-[10px] text-yellow-700">{result.errors.join('; ')}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {result && result.results && result.results.length > 0 && !result.errors?.length && (
+        <div className="mt-2.5 bg-green-50 border border-green-200 rounded-lg p-2">
+          <div className="flex items-start gap-1.5">
+            <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0">
+              <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div>
+              <div className="font-semibold text-green-900 text-xs">Success!</div>
+              <div className="text-[10px] text-green-700">
+                {result.results.length} seat(s) booked
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

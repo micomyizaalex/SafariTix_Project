@@ -1,46 +1,28 @@
-import * as React from "react";
-import { Slot } from "@radix-ui/react-slot@1.1.2";
-import { cva, type VariantProps } from "class-variance-authority@0.7.1";
+import React, { CSSProperties } from 'react';
 
-import { cn } from "./utils";
+type Variant = 'default' | 'primary' | 'success' | 'danger' | 'warning';
 
-const badgeVariants = cva(
-  "inline-flex items-center justify-center rounded-md border px-2 py-0.5 text-xs font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive transition-[color,box-shadow] overflow-hidden",
-  {
-    variants: {
-      variant: {
-        default:
-          "border-transparent bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
-        secondary:
-          "border-transparent bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
-        destructive:
-          "border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
-        outline:
-          "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-    },
-  },
-);
+export const Badge: React.FC<{ children?: React.ReactNode; variant?: Variant; }> = ({ children, variant = 'default' }) => {
+  const colors: Record<Variant, { bg: string; color: string }> = {
+    default: { bg: '#e2e8f0', color: '#0f172a' },
+    primary: { bg: '#e6f2ff', color: '#0369a1' },
+    success: { bg: '#ecfdf5', color: '#065f46' },
+    danger: { bg: '#fff1f2', color: '#9f1239' },
+    warning: { bg: '#fff7ed', color: '#92400e' },
+  };
 
-function Badge({
-  className,
-  variant,
-  asChild = false,
-  ...props
-}: React.ComponentProps<"span"> &
-  VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
-  const Comp = asChild ? Slot : "span";
+  const style: CSSProperties = {
+    display: 'inline-block',
+    padding: '4px 8px',
+    borderRadius: 9999,
+    fontSize: 12,
+    fontWeight: 600,
+    lineHeight: 1,
+    background: colors[variant].bg,
+    color: colors[variant].color,
+  };
 
-  return (
-    <Comp
-      data-slot="badge"
-      className={cn(badgeVariants({ variant }), className)}
-      {...props}
-    />
-  );
-}
+  return <span style={style}>{children}</span>;
+};
 
-export { Badge, badgeVariants };
+export default Badge;

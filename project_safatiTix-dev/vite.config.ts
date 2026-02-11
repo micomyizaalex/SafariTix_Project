@@ -58,5 +58,17 @@
     server: {
       port: 3000,
       open: true,
+      hmr: {
+        overlay: false,
+      },
+      proxy: {
+        // Proxy API requests during development to the backend server
+        '/api': {
+          target: 'http://localhost:5000',
+          changeOrigin: true,
+          secure: false,
+          rewrite: (path) => path.replace(/^\/api/, '/api')
+        }
+      },
     },
   });

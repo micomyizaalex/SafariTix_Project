@@ -4,19 +4,24 @@ import { AuthProvider } from './components/AuthContext';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 
 import HomePage from './pages/HomePage';
-import { LandingPage } from './components/LandingPage';
+import { LandingPage } from './pages/public/LandingPage';
 import Layout from './pages/Layout';
 import { RequireRole, RedirectByRole } from './components/RouteGuards';
 import NotFound from './pages/NotFound';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import ScheduleDetails from './pages/ScheduleDetails';
-import { AdminDashboard } from './components/AdminDashboard';
-import { CompanyDashboardLayout } from './components/CompanyDashboardLayout';
-import { CompanyHome } from './components/CompanyHome';
-import { CommuterDashboard } from './components/CommuterDashboard';
-import { DriverDashboard } from './components/DriverDashboard';
-import { Schedules } from './components/schedules';
+import AdminDashboard from './pages/admin/AdminDashboard';
+import CommuterDashboard from './pages/commuter/CommuterDashboard';
+import DriverDashboard from './pages/driver/DriverDashboard';
+import PublicLayout from './layouts/PublicLayout';
+import AdminLayout from './layouts/AdminLayout';
+import CompanyLayout from './layouts/CompanyLayout';
+import CommuterLayout from './layouts/CommuterLayout';
+import DriverLayout from './layouts/DriverLayout';
+import CompanyDashboard from './pages/company/CompanyDashboard';
+import TailwindExample from './components/TailwindExample';
+import { Schedules } from './pages/commuter/schedules';
 import Tickets from './pages/Tickets';
 import Buses from './pages/Buses';
 import Drivers from './pages/Drivers';
@@ -25,7 +30,7 @@ import LiveTracking from './pages/LiveTracking';
 import Revenue from './pages/Revenue';
 import SubscriptionPage from './pages/SubscriptionPage';
 import ReportsPage from './pages/ReportsPage';
-import DriverTracking from './pages/DriverTracking';
+import DriverTracking from './pages/company/DriverTracking';
 
 const App = () => {
   return (
@@ -45,26 +50,24 @@ const App = () => {
               <Route path='*' element={<NotFound />} />
             </Route>
 
-            {/* Dashboard routes */}
+            {/* Dashboard routes - new layouts */}
             <Route path='/dashboard' element={<Layout />}>
-              <Route path='admin' element={<RequireRole allowed={["admin"]}><AdminDashboard/></RequireRole>} />
-              
-              {/* Company Dashboard with nested routes */}
-              <Route path='company' element={<RequireRole allowed={["company_admin"]}><CompanyDashboardLayout/></RequireRole>}>
-                <Route index element={<CompanyHome />} />
-                <Route path='schedules' element={<Schedules />} />
-                <Route path='tickets' element={<Tickets />} />
-                <Route path='buses' element={<Buses />} />
-                <Route path='drivers' element={<Drivers />} />
-                <Route path='tracking' element={<LiveTracking />} />
-                <Route path='revenue' element={<Revenue />} />
-                <Route path='subscription' element={<SubscriptionPage />} />
-                <Route path='reports' element={<ReportsPage />} />
-                <Route path='settings' element={<CompanySettings />} />
+              <Route path='admin' element={<RequireRole allowed={["admin"]}><AdminLayout/></RequireRole>}>
+                <Route index element={<AdminDashboard/>} />
               </Route>
-              
-              <Route path='commuter' element={<RequireRole allowed={["commuter"]}><CommuterDashboard/></RequireRole>} />
-              <Route path='driver' element={<RequireRole allowed={["driver"]}><DriverDashboard/></RequireRole>} />
+
+              <Route path='company' element={<RequireRole allowed={["company_admin"]}><CompanyLayout/></RequireRole>}>
+                <Route index element={<CompanyDashboard/>} />
+              </Route>
+
+              <Route path='commuter' element={<RequireRole allowed={["commuter"]}><CommuterLayout/></RequireRole>}>
+                <Route index element={<CommuterDashboard/>} />
+              </Route>
+
+              <Route path='driver' element={<RequireRole allowed={["driver"]}><DriverLayout/></RequireRole>}>
+                <Route index element={<DriverDashboard/>} />
+              </Route>
+
               <Route path='*' element={<NotFound />} />
             </Route>
 
@@ -73,18 +76,11 @@ const App = () => {
               <Route index element={<RequireRole allowed={["driver"]}><DriverDashboard/></RequireRole>} />
               <Route path='tracking' element={<RequireRole allowed={["driver"]}><DriverTracking/></RequireRole>} />
             </Route>
-            <Route path='/company/dashboard' element={<RequireRole allowed={["company_admin"]}><CompanyDashboardLayout/></RequireRole>}>
-              <Route index element={<CompanyHome />} />
-              <Route path='schedules' element={<Schedules />} />
-              <Route path='tickets' element={<Tickets />} />
-              <Route path='buses' element={<Buses />} />
-              <Route path='drivers' element={<Drivers />} />
-              <Route path='tracking' element={<LiveTracking />} />
-              <Route path='revenue' element={<Revenue />} />
-              <Route path='subscription' element={<SubscriptionPage />} />
-              <Route path='reports' element={<ReportsPage />} />
-              <Route path='settings' element={<CompanySettings />} />
+            {/* Tailwind test route */}
+            <Route path='/tailwind-test' element={<Layout />}>
+              <Route index element={<TailwindExample/>} />
             </Route>
+            {/* /company/dashboard routes removed (reset). */}
 
             {/* Fallback route */}
             <Route path='*' element={<NotFound />} />

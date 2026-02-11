@@ -8,6 +8,9 @@ import { useState, CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { Bus, AlertCircle, Eye, EyeOff, TrendingUp, MapPin, Users, Check, ArrowLeft } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
+import { useAuth } from './AuthContext';
+import { useNavigate } from 'react-router-dom';
+import { getHomePath } from './RouteGuards';
 
 export function Login() {
   const [isLoading, setIsLoading] = useState(false);
@@ -18,6 +21,8 @@ export function Login() {
   // Login state
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const { signIn } = useAuth();
+  const navigate = useNavigate();
 
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -45,13 +50,10 @@ export function Login() {
 
       setSuccessMessage('Login successful!');
 
-      // Persist token/user for subsequent requests and perform a full redirect
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-
-      const redirect = data?.homePath || data?.user?.homePath;
-      // Do a full page navigation so AuthProvider re-initializes from localStorage
-      window.location.href = redirect || '/';
+      // Use AuthProvider to persist and set the authenticated user, then navigate
+      await signIn(data.token, data.user);
+      const redirect = data?.homePath || data?.user?.homePath || getHomePath(data.user);
+      navigate(redirect || '/', { replace: true });
 
     } catch (err: any) {
       setError(err.message || 'Login failed');
@@ -419,14 +421,14 @@ export function Login() {
 
           {/* Error/Success Messages */}
           {error && (
-            <Alert style={{ marginBottom: '20px', borderColor: '#E63946', background: '#FEE2E2' }}>
+            <Alert className="mb-4 bg-red-50 border-red-200" style={{ marginBottom: '20px' }}>
               <AlertCircle style={{ width: '16px', height: '16px', color: '#E63946' }} />
               <AlertDescription style={{ color: '#991B1B' }}>{error}</AlertDescription>
             </Alert>
           )}
 
           {successMessage && (
-            <Alert style={{ marginBottom: '20px', borderColor: '#27AE60', background: '#DCFCE7' }}>
+            <Alert className="mb-4 bg-green-50 border-green-200" style={{ marginBottom: '20px' }}>
               <Check style={{ width: '16px', height: '16px', color: '#27AE60' }} />
               <AlertDescription style={{ color: '#166534' }}>{successMessage}</AlertDescription>
             </Alert>
@@ -494,6 +496,7 @@ export function Login() {
             <button
               type="submit"
               style={styles.submitBtn}
+              className="w-full px-4 py-3 rounded-lg font-semibold text-white bg-primary hover:opacity-95"
               disabled={isLoading}
               onMouseEnter={(e) => !isLoading && (e.currentTarget.style.background = '#005a8c')}
               onMouseLeave={(e) => !isLoading && (e.currentTarget.style.background = '#0077B6')}

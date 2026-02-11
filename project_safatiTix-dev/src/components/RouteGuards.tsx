@@ -2,7 +2,7 @@ import React from 'react';
 import { useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 
-function getHomePath(user: { role?: string; homePath?: string } | null): string {
+export function getHomePath(user: { role?: string; homePath?: string } | null): string {
   if (!user) return '/login';
   if (user.homePath) return user.homePath;
   switch (user.role) {

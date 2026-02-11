@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet } from 'react-router-dom';
-import { LandingPage } from '../components/LandingPage';
+import { LandingPage } from './public/LandingPage';
 
 const Layout = ({ showLanding = false }: { showLanding?: boolean }) => {
   return (

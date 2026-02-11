@@ -1,149 +1,100 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import { supabase, API_URL } from '../utils/supabase-client';
-import { publicAnonKey } from '../utils/supabase/info';
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 
-interface User {
-  id: string;
-  email: string;
-  name: string;
-  phone?: string;
-  role: 'admin' | 'company_admin' | 'commuter' | 'driver';
-  companyId?: string;
-}
+type User = { id?: string; name?: string; companyId?: string; companyName?: string; role?: string; homePath?: string } | null;
 
-interface AuthContextType {
-  user: User | null;
-  accessToken: string | null;
+interface AuthContextValue {
+  user: User;
+  accessToken?: string;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, name: string, role: string, companyName?: string) => Promise<any>;
-  signOut: () => Promise<void>;
+  signIn: (token: string, user: User) => Promise<void>;
+  signOut: () => void;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User>(null);
+  const [accessToken, setAccessToken] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
 
+  // Initialize auth from localStorage and optionally verify token
   useEffect(() => {
-    checkUser();
-  }, []);
+    let mounted = true;
+    const init = async () => {
+      const token = localStorage.getItem('token');
+      const stored = localStorage.getItem('user');
 
-  async function checkUser() {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        setAccessToken(session.access_token);
-        await fetchUserData(session.access_token);
+      if (!token || !stored) {
+        if (mounted) {
+          setUser(null);
+          setAccessToken(undefined);
+          setLoading(false);
+        }
         return;
       }
 
-      // Fallback: if an auth token was stored in localStorage by the app (e.g., native backend login), use it
-      const storedToken = localStorage.getItem('token');
-      const storedUser = localStorage.getItem('user');
-      if (storedToken) {
-        setAccessToken(storedToken);
-        if (storedUser) {
-          try {
-            setUser(JSON.parse(storedUser));
-          } catch (err) {
-            // ignore parse errors
+      try {
+        // Attempt server verification if endpoint exists
+        const res = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (mounted) {
+            setUser(json.user || JSON.parse(stored));
+            setAccessToken(token);
+            setLoading(false);
           }
-        } else {
-          await fetchUserData(storedToken);
+          return;
         }
+      } catch (e) {
+        // ignore and fall back to stored user
       }
-    } catch (error) {
-      // Session check errors are handled silently
-    } finally {
-      setLoading(false);
-    }
-  }
 
-  async function fetchUserData(token: string) {
-    try {
-      const response = await fetch(`${API_URL}/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
+      if (mounted) {
+        try {
+          setUser(JSON.parse(stored));
+          setAccessToken(token);
+        } catch (e) {
+          setUser(null);
+          setAccessToken(undefined);
         }
-      });
-      if (response.ok) {
-        const { user: userData } = await response.json();
-        setUser(userData);
+        setLoading(false);
       }
-    } catch (error) {
-      // User data fetch errors are handled silently
-    }
-  }
+    };
 
-  async function signIn(email: string, password: string) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
+    init();
+    return () => { mounted = false; };
+  }, []);
 
-    if (error) throw error;
-    
-    if (data.session) {
-      setAccessToken(data.session.access_token);
-      await fetchUserData(data.session.access_token);
-    }
-  }
+  const signIn = async (token: string, u: User) => {
+    // Persist and update state
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(u || null));
+    setAccessToken(token);
+    setUser(u || null);
+    setLoading(false);
+  };
 
-  async function signUp(email: string, password: string, name: string, role: string, companyName?: string) {
-    const response = await fetch(`${API_URL}/signup`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${publicAnonKey}`
-      },
-      body: JSON.stringify({ email, password, name, role, companyName })
-    });
-
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(data?.error || 'Sign up failed');
-    }
-
-    // Return server response to caller (do not auto sign-in). Caller will
-    // handle redirecting the user to the login view and showing messages.
-    return data;
-  }
-
-  async function signOut() {
-    try {
-      await supabase.auth.signOut();
-    } catch (err) {
-      // ignore errors from supabase signOut
-    }
-    // Clear local auth state and any stored tokens
+  const signOut = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    setAccessToken(undefined);
     setUser(null);
-    setAccessToken(null);
-
-    // Redirect to landing page
-    try {
-      window.location.href = '/';
-    } catch (err) {
-      // ignore
-    }
-  }
+  };
 
   return (
-    <AuthContext.Provider value={{ user, accessToken, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, accessToken, loading, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );
-}
+};
 
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-  return context;
-}
+export const useAuth = () => {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
+};
+
+export default AuthProvider;
