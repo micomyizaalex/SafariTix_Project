@@ -5,6 +5,7 @@ const { requireRoles } = require('../middleware/authorize');
 const controller = require('../controllers/companySelfController');
 
 router.get('/', auth, controller.getCompany);
+router.get('/dashboard-stats', auth, requireRoles(['company_admin','admin']), controller.getDashboardStats);
 router.get('/buses', auth, requireRoles(['company_admin','admin']), controller.getBuses);
 router.post('/buses', auth, requireRoles(['company_admin','admin']), controller.createBus);
 router.patch('/buses/:id/status', auth, requireRoles(['company_admin','admin']), controller.patchBusStatus);

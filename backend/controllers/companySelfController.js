@@ -722,6 +722,225 @@ const patchBusStatus = async (req, res) => {
   }
 };
 
+const getDashboardStats = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const user = await User.findByPk(userId);
+    
+    // Find company ID (same logic as getCompany)
+    let companyId = user?.company_id;
+    
+    if (!companyId) {
+      const company = await Company.findOne({ where: { owner_id: userId } });
+      companyId = company?.id;
+    }
+    
+    console.log('getDashboardStats for user:', userId, 'company:', companyId);
+    
+    if (!companyId) {
+      console.log('No company found, returning empty stats');
+      return res.json({
+        balance: 0,
+        sales: 0,
+        totalProfit: 0,
+        balanceGrowth: 0,
+        salesGrowth: 0,
+        weekData: [],
+        recentSales: [],
+        lastOrders: [],
+        profitBreakdown: {}
+      });
+    }
+
+    // Get all confirmed tickets for this company
+    const allTickets = await Ticket.findAll({
+      where: {
+        company_id: companyId,
+        status: { [Op.in]: ['CONFIRMED', 'CHECKED_IN'] }
+      },
+      include: [
+        {
+          model: User,
+          as: 'passenger',
+          attributes: ['id', 'full_name', 'email'],
+          required: false
+        },
+        {
+          model: Schedule,
+          attributes: ['id', 'schedule_date', 'departure_time'],
+          required: false,
+          include: [
+            {
+              model: Route,
+              attributes: ['origin', 'destination'],
+              required: false
+            }
+          ]
+        }
+      ],
+      order: [['booked_at', 'DESC']]
+    });
+
+    // Calculate total revenue
+    const totalRevenue = allTickets.reduce((sum, ticket) => sum + parseFloat(ticket.price || 0), 0);
+    
+    // Get tickets from last 30 days for growth calculation
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const last30DaysTickets = allTickets.filter(t => new Date(t.booked_at) >= thirtyDaysAgo);
+    const last30DaysRevenue = last30DaysTickets.reduce((sum, t) => sum + parseFloat(t.price || 0), 0);
+    
+    // Get tickets from previous 30 days for comparison
+    const sixtyDaysAgo = new Date();
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+    
+    const previous30DaysTickets = allTickets.filter(t => {
+      const bookedAt = new Date(t.booked_at);
+      return bookedAt >= sixtyDaysAgo && bookedAt < thirtyDaysAgo;
+    });
+    const previous30DaysRevenue = previous30DaysTickets.reduce((sum, t) => sum + parseFloat(t.price || 0), 0);
+    
+    // Calculate growth percentages
+    const revenueGrowth = previous30DaysRevenue > 0 
+      ? ((last30DaysRevenue - previous30DaysRevenue) / previous30DaysRevenue * 100).toFixed(1)
+      : 0;
+    
+    const salesCountGrowth = previous30DaysTickets.length > 0
+      ? ((last30DaysTickets.length - previous30DaysTickets.length) / previous30DaysTickets.length * 100).toFixed(1)
+      : 0;
+
+    // Get last 7 days data for weekly chart
+    const weekData = [];
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      date.setHours(0, 0, 0, 0);
+      
+      const nextDate = new Date(date);
+      nextDate.setDate(nextDate.getDate() + 1);
+      
+      const dayTickets = allTickets.filter(t => {
+        const bookedAt = new Date(t.booked_at);
+        return bookedAt >= date && bookedAt < nextDate;
+      });
+      
+      const dayRevenue = dayTickets.reduce((sum, t) => sum + parseFloat(t.price || 0), 0);
+      
+      weekData.push({
+        day: days[date.getDay()],
+        value: Math.round(dayRevenue)
+      });
+    }
+
+    // Get recent sales (last 10 bookings)
+    const recentSales = allTickets.slice(0, 10).map(ticket => {
+      const timeDiff = Date.now() - new Date(ticket.booked_at).getTime();
+      const minutesAgo = Math.floor(timeDiff / 60000);
+      
+      let timestamp;
+      if (minutesAgo < 60) {
+        timestamp = `${minutesAgo} Minutes Ago`;
+      } else if (minutesAgo < 1440) {
+        timestamp = `${Math.floor(minutesAgo / 60)} Hours Ago`;
+      } else {
+        timestamp = `${Math.floor(minutesAgo / 1440)} Days Ago`;
+      }
+      
+      return {
+        id: ticket.id,
+        customerName: ticket.passenger?.full_name || 'Anonymous',
+        customerAvatar: '👤',
+        amount: parseFloat(ticket.price || 0),
+        timestamp
+      };
+    });
+
+    // Get top orders (highest value tickets)
+    const topOrders = [...allTickets]
+      .sort((a, b) => parseFloat(b.price || 0) - parseFloat(a.price || 0))
+      .slice(0, 5)
+      .map(ticket => {
+        const bookedDate = new Date(ticket.booked_at);
+        const formattedDate = bookedDate.toLocaleDateString('en-GB', { 
+          day: '2-digit', 
+          month: 'short', 
+          year: 'numeric' 
+        });
+        
+        return {
+          id: ticket.id,
+          customerName: ticket.passenger?.full_name || 'Anonymous',
+          customerAvatar: '👤',
+          amount: parseFloat(ticket.price || 0),
+          status: ticket.status === 'CHECKED_IN' ? 'completed' : 'completed',
+          date: formattedDate
+        };
+      });
+
+    // Calculate profit breakdown by route
+    const routeRevenue = {};
+    allTickets.forEach(ticket => {
+      const route = ticket.Schedule?.Route;
+      if (route) {
+        const routeKey = `${route.origin} - ${route.destination}`;
+        if (!routeRevenue[routeKey]) {
+          routeRevenue[routeKey] = 0;
+        }
+        routeRevenue[routeKey] += parseFloat(ticket.price || 0);
+      }
+    });
+
+    // Get top 3 routes by revenue
+    const sortedRoutes = Object.entries(routeRevenue)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 3);
+
+    const profitBreakdown = {};
+    let topRoutesTotal = 0;
+    
+    sortedRoutes.forEach(([route, revenue], index) => {
+      const percentage = totalRevenue > 0 ? (revenue / totalRevenue * 100).toFixed(0) : 0;
+      profitBreakdown[route] = {
+        amount: Math.round(revenue),
+        percentage: parseInt(percentage)
+      };
+      topRoutesTotal += revenue;
+    });
+
+    // Add "Other" category for remaining routes
+    const otherRevenue = totalRevenue - topRoutesTotal;
+    if (otherRevenue > 0) {
+      const percentage = totalRevenue > 0 ? (otherRevenue / totalRevenue * 100).toFixed(0) : 0;
+      profitBreakdown['Other Routes'] = {
+        amount: Math.round(otherRevenue),
+        percentage: parseInt(percentage)
+      };
+    }
+
+    const responseData = {
+      balance: Math.round(totalRevenue),
+      sales: Math.round(last30DaysRevenue),
+      totalProfit: Math.round(totalRevenue),
+      balanceGrowth: parseFloat(revenueGrowth),
+      salesGrowth: parseFloat(salesCountGrowth),
+      weekData,
+      recentSales,
+      lastOrders: topOrders,
+      profitBreakdown
+    };
+
+    console.log('Returning dashboard stats:', JSON.stringify(responseData, null, 2));
+    res.json(responseData);
+
+  } catch (error) {
+    console.error('getDashboardStats error:', error);
+    res.status(400).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getCompany,
   getBuses,
@@ -741,7 +960,8 @@ module.exports = {
   deleteDriver,
   deleteBus,
   reopenScheduleTickets,
-  getScheduleJournals
+  getScheduleJournals,
+  getDashboardStats
 };
 
 
