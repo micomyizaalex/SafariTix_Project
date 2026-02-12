@@ -94,30 +94,41 @@ export default function CommuterDashboard() {
     const hdrs: Record<string,string> = { 'Content-Type': 'application/json' };
     if (accessToken) hdrs['Authorization'] = `Bearer ${accessToken}`;
 
-    const fetchUpcoming = async () => {
+    // Fetch user tickets directly from /api/tickets
+    const fetchTickets = async () => {
       try {
-        const res = await fetch('/api/commuter/upcoming', { headers: hdrs });
+        const res = await fetch('/api/tickets', { headers: hdrs });
         if (!mounted) return;
         if (res.ok) {
           const json = await res.json();
-          setUpcomingTrips(Array.isArray(json) ? json : json.upcoming || []);
+          const tickets = Array.isArray(json.tickets) ? json.tickets : (json.tickets || []);
+          // upcoming: only CONFIRMED
+          const confirmed = tickets.filter((t:any) => t.status === 'CONFIRMED');
+          setUpcomingTrips(confirmed);
+          // recent bookings: latest tickets (all statuses) sorted by createdAt
+          const recent = tickets.slice().sort((a:any,b:any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setRecentBookings(recent);
         } else {
           setUpcomingTrips([]);
+          setRecentBookings([]);
         }
       } catch (e) {
         setUpcomingTrips([]);
+        setRecentBookings([]);
       } finally {
-        if (mounted) setLoading((s) => ({ ...s, upcoming: false }));
+        if (mounted) setLoading((s) => ({ ...s, upcoming: false, recent: false }));
       }
     };
 
-    const fetchPopular = async () => {
+    // Fetch available schedules (used for Book New Ticket / popular routes)
+    const fetchSchedules = async () => {
       try {
-        const res = await fetch('/api/commuter/popular-routes', { headers: hdrs });
+        const res = await fetch('/api/schedules', { headers: hdrs });
         if (!mounted) return;
         if (res.ok) {
           const json = await res.json();
-          setPopularRoutes(Array.isArray(json) ? json : json.routes || []);
+          const schedules = Array.isArray(json.schedules) ? json.schedules : (json.schedules || []);
+          setPopularRoutes(schedules);
         } else {
           setPopularRoutes([]);
         }
@@ -128,40 +139,22 @@ export default function CommuterDashboard() {
       }
     };
 
+    // lightweight stats derived from tickets/schedules
     const fetchStats = async () => {
       try {
-        const res = await fetch('/api/commuter/summary', { headers: hdrs });
+        // use /api/tickets for counts
+        const res = await fetch('/api/tickets', { headers: hdrs });
         if (!mounted) return;
         if (res.ok) {
           const json = await res.json();
-          setStats({
-            totalTrips: json.totalTrips ?? json.total_trips ?? 0,
-            activeTickets: json.activeTickets ?? json.active_tickets ?? 0,
-            favoriteRoutes: json.favoriteRoutes ?? json.favorite_routes ?? 0,
-            rewardsPoints: json.rewardsPoints ?? json.rewards_points ?? 0,
-          });
+          const tickets = Array.isArray(json.tickets) ? json.tickets : (json.tickets || []);
+          const confirmed = tickets.filter((t:any) => t.status === 'CONFIRMED');
+          setStats((s) => ({ ...s, totalTrips: tickets.length, activeTickets: confirmed.length }));
         }
       } catch (e) {
         // keep defaults
       } finally {
         if (mounted) setLoading((s) => ({ ...s, stats: false }));
-      }
-    };
-
-    const fetchRecent = async () => {
-      try {
-        const res = await fetch('/api/commuter/recent-bookings', { headers: hdrs });
-        if (!mounted) return;
-        if (res.ok) {
-          const json = await res.json();
-          setRecentBookings(Array.isArray(json) ? json : json.bookings || []);
-        } else {
-          setRecentBookings([]);
-        }
-      } catch (e) {
-        setRecentBookings([]);
-      } finally {
-        if (mounted) setLoading((s) => ({ ...s, recent: false }));
       }
     };
 
@@ -182,10 +175,9 @@ export default function CommuterDashboard() {
       }
     };
 
-    fetchUpcoming();
-    fetchPopular();
+    fetchTickets();
+    fetchSchedules();
     fetchStats();
-    fetchRecent();
     fetchNotifs();
 
     return () => { mounted = false; };

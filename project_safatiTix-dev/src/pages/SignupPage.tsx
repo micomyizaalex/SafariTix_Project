@@ -40,18 +40,24 @@ export default function SignupPage() {
     setIsLoading(true);
 
     try {
+      const payload = {
+        full_name: signupName,
+        email: signupEmail,
+        password: signupPassword,
+        role: signupRole,
+        company_name: signupRole === 'company_admin' ? companyName : undefined,
+      };
+
+      // TEMP LOG: inspect payload before sending to ensure role is present
+      // Remove this log after verification
+      console.log('Signup payload:', payload);
+
       const response = await fetch('http://localhost:5000/api/auth/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          full_name: signupName,
-          email: signupEmail,
-          password: signupPassword,
-          role: signupRole,
-          company_name: signupRole === 'company_admin' ? companyName : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();
@@ -488,11 +494,11 @@ export default function SignupPage() {
             {/* Role Selection */}
             <div style={styles.formGroup}>
               <label style={styles.label}>I am a</label>
-              <Select value={signupRole} onValueChange={setSignupRole}>
+              <Select>
                 <SelectTrigger>
                   <SelectValue placeholder="Select your role" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent value={signupRole} onChange={(e) => setSignupRole(e.target.value)}>
                   <SelectItem value="commuter">Commuter (Passenger)</SelectItem>
                   <SelectItem value="company_admin">Transport Company</SelectItem>
                   <SelectItem value="driver">Driver</SelectItem>

@@ -1,4 +1,4 @@
-const { User, Company } = require('../models');
+const { User, Company, Driver } = require('../models');
 const { generateAccessToken, generateRefreshToken, verifyToken } = require('../config/jwt');
 
 // Helper to compute a default home path for a given role
@@ -37,7 +37,8 @@ const register = async (req, res) => {
       email,
       password,
       role: role || 'commuter',
-      phone_number
+      phone_number,
+      company_id: req.body.company_id || null
     });
 
     // If registering a company admin, create an approved company and issue a token
@@ -64,6 +65,26 @@ const register = async (req, res) => {
         company,
         token
       });
+    }
+
+    // If registering as a driver and a license_number was provided, create a Driver profile
+    if (role === 'driver') {
+      const { license_number } = req.body;
+      try {
+        if (license_number) {
+          await Driver.create({
+            company_id: req.body.company_id || null,
+            user_id: user.id,
+            name: full_name,
+            license_number,
+            phone: phone_number,
+            email
+          });
+        }
+      } catch (drvErr) {
+        // Log but don't block registration if driver profile creation fails
+        console.warn('Failed to create Driver profile during registration:', drvErr && drvErr.message ? drvErr.message : drvErr);
+      }
     }
 
     const token = generateAccessToken(user.id, user.role);

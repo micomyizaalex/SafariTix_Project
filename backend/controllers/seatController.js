@@ -1,4 +1,4 @@
-const { sequelize, Seat, SeatLock, Ticket, Schedule, Bus } = require('../models');
+const { sequelize, Seat, SeatLock, Ticket, Schedule, Bus, Route } = require('../models');
 const { Op } = require('sequelize');
 
 const LOCK_DURATION_MINUTES = parseInt(process.env.SEAT_LOCK_MINUTES || '7', 10);
@@ -191,4 +191,78 @@ const releaseLock = async (req, res) => {
   }
 };
 
-module.exports = { getSeatsForSchedule, lockSeat, confirmLock, releaseLock };
+// Direct booking: create CONFIRMED ticket and consume any user's active lock atomically
+const bookSeat = async (req, res) => {
+  const { scheduleId } = req.params;
+  // authenticate middleware sets req.userId
+  const passenger_id = req.userId || (req.user && req.user.id);
+  const { seat_number, price } = req.body;
+
+  if (!seat_number) return res.status(400).json({ message: 'seat_number required' });
+  if (!passenger_id) return res.status(401).json({ message: 'Authentication required' });
+
+  const t = await sequelize.transaction({ isolationLevel: 'SERIALIZABLE' });
+  try {
+    // lock only the schedule row to avoid FOR UPDATE on JOINs (Postgres error)
+    const schedule = await Schedule.findByPk(scheduleId, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!schedule) { await t.rollback(); return res.status(404).json({ message: 'Schedule not found' }); }
+
+    const now = new Date();
+    if (schedule.status !== 'scheduled') { await t.rollback(); return res.status(400).json({ message: 'Schedule not available for booking' }); }
+    if (schedule.ticket_status === 'CLOSED') { await t.rollback(); return res.status(400).json({ message: 'Ticket sales closed for this schedule' }); }
+    if (schedule.departure_time && new Date(schedule.departure_time) <= now) { await t.rollback(); return res.status(400).json({ message: 'Ticket sales closed for this schedule' }); }
+
+    // check already confirmed ticket
+    const existingConfirmed = await Ticket.findOne({ where: { schedule_id: scheduleId, seat_number, status: 'CONFIRMED' }, transaction: t, lock: t.LOCK.UPDATE });
+    if (existingConfirmed) { await t.rollback(); return res.status(409).json({ message: 'Seat already booked' }); }
+
+    // check active lock
+    const activeLock = await SeatLock.findOne({ where: { schedule_id: scheduleId, seat_number, status: 'ACTIVE', expires_at: { [Op.gt]: now } }, transaction: t, lock: t.LOCK.UPDATE });
+    if (activeLock && activeLock.passenger_id !== passenger_id) { await t.rollback(); return res.status(409).json({ message: 'Seat is temporarily locked' }); }
+
+    // create confirmed ticket
+    const ticket = await Ticket.create({
+      passenger_id,
+      schedule_id: scheduleId,
+      company_id: schedule.company_id,
+      seat_number,
+      price: price || 0,
+      booking_ref: `BK-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
+      status: 'CONFIRMED',
+      booked_at: new Date(),
+    }, { transaction: t });
+
+    // if there was an active lock belonging to this user, consume it and link to ticket
+    if (activeLock && activeLock.passenger_id === passenger_id) {
+      activeLock.status = 'CONSUMED';
+      activeLock.ticket_id = ticket.id;
+      await activeLock.save({ transaction: t });
+      ticket.lock_id = activeLock.id;
+      await ticket.save({ transaction: t });
+    }
+
+    // decrement available seats and increment booked
+    if (parseInt(schedule.available_seats || 0) <= 0) { await t.rollback(); return res.status(400).json({ message: 'No seats available' }); }
+    schedule.available_seats = parseInt(schedule.available_seats) - 1;
+    schedule.booked_seats = (parseInt(schedule.booked_seats || 0) + 1);
+    await schedule.save({ transaction: t });
+
+    await t.commit();
+
+    // reload ticket with associations for response
+    const ticketWithSchedule = await Ticket.findByPk(ticket.id, { include: [{ model: Schedule, include: [Route] }, { model: SeatLock, as: 'lock' }] });
+
+    res.status(201).json({ ticket: ticketWithSchedule });
+  } catch (error) {
+    await t.rollback();
+    console.error('bookSeat error', error);
+    const resp = { message: 'Failed to book seat' };
+    if (process.env.NODE_ENV !== 'production') {
+      resp.error = error && (error.message || String(error));
+      resp.stack = error && error.stack;
+    }
+    res.status(500).json(resp);
+  }
+};
+
+module.exports = { getSeatsForSchedule, lockSeat, confirmLock, releaseLock, bookSeat };

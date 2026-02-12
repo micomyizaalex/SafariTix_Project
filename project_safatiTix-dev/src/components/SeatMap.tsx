@@ -113,9 +113,9 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
       const hdrs: Record<string, string> = { 'Content-Type': 'application/json' };
       if (accessToken) hdrs['Authorization'] = `Bearer ${accessToken}`;
       for (const seatNum of picks) {
-        const body = { seat_number: seatNum, passenger_id: user?.id, price };
+        const body = { seat_number: seatNum, price };
         try {
-          const res = await fetch(`/api/seats/schedules/${scheduleId}/lock`, {
+          const res = await fetch(`/api/seats/schedules/${scheduleId}/book`, {
             method: 'POST',
             headers: hdrs,
             body: JSON.stringify(body)
@@ -126,7 +126,8 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
             continue;
           }
           const json = await res.json();
-          results.push({ seat: seatNum, ...json });
+          // API returns ticket object in { ticket }
+          results.push({ seat: seatNum, ticket: json.ticket });
         } catch (err: any) {
           errs.push(`Seat ${seatNum}: ${err.message || 'Failed'}`);
         }
@@ -140,12 +141,17 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
       
       await fetchSeats();
       
-      const successSeats = results.map((r) => String(r.ticket_id || r.lock_id || r.seat_number));
+      const successSeats = results.map((r) => String((r.ticket && r.ticket.id) || r.seat_number));
       setSelected((prev) => {
         const copy = { ...prev };
         for (const s of successSeats) delete copy[s];
         return copy;
       });
+      // If we have at least one confirmed ticket and no blocking errors, redirect to My Tickets
+      if (results.length > 0 && errs.length === 0) {
+        // small delay so user sees confirmation
+        setTimeout(() => { window.location.href = '/commuter/my-tickets'; }, 800);
+      }
     } finally {
       setLocking(false);
     }
