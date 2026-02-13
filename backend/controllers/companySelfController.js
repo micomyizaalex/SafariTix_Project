@@ -1,4 +1,4 @@
-const { Company, Bus, Schedule, Ticket, User, Driver, Route } = require('../models');
+const { Company, Bus, Schedule, Ticket, User, Driver, Route, DriverAssignment } = require('../models');
 const crypto = require('crypto');
 const { Op } = require('sequelize');
 const busService = require('../services/busService');
@@ -40,8 +40,8 @@ const getBuses = async (req, res) => {
   try {
     const companyId = req.companyId || (await User.findByPk(req.userId)).company_id;
     if (!companyId) return res.json({ buses: [] });
-
-    const buses = await busService.listBuses(companyId);
+    const buses = await busService.listBuses(companyId) || [];
+    console.log('getBuses: companyId=', companyId, 'raw buses count=', (buses && buses.length) || 0);
     const mapped = buses.map(b => ({
       id: b.id,
       plateNumber: b.plate_number,
@@ -49,8 +49,10 @@ const getBuses = async (req, res) => {
       capacity: b.capacity,
       seatLayout: b.seat_layout,
       driverId: b.driver_id || null,
+      driverName: (b.driver && (b.driver.full_name || b.driver.name)) || null,
       status: b.status.toLowerCase()
     }));
+    console.log('getBuses: mapped count=', mapped.length);
     res.json({ buses: mapped });
   } catch (error) {
     console.error('assignBusDriver error:', error);
@@ -61,7 +63,7 @@ const getBuses = async (req, res) => {
 const createBus = async (req, res) => {
   try {
     console.log('createBus request payload:', req.body, 'userId:', req.userId);
-    console.log('createBus request payload:', req.body, 'userId:', req.userId);
+    console.log('Driver ID received:', req.body.driver_id || req.body.driverId || null);
     const userId = req.userId;
     const companyId = req.companyId || (await User.findByPk(userId)).company_id;
     if (!companyId) return res.status(403).json({ error: 'No company associated with user' });
@@ -74,7 +76,20 @@ const createBus = async (req, res) => {
       driver_id: req.body.driverId || req.body.driver_id || null
     };
 
-    const bus = await busService.createBus(companyId, payload, { assignedBy: userId });
+
+      // Validate driver_id if provided to prevent foreign key violations
+      if (payload.driver_id) {
+        // Ensure driver exists in users table and has role 'driver'
+        const driverUser = await User.findOne({ where: { id: payload.driver_id, role: 'driver' } });
+        if (!driverUser || !driverUser.id) {
+          return res.status(400).json({ error: 'Invalid driver selected' });
+        }
+        if (driverUser.company_id !== companyId) {
+          return res.status(400).json({ error: 'Invalid driver selected' });
+        }
+      }
+
+      const bus = await busService.createBus(companyId, payload, { assignedBy: userId });
 
     const mapped = {
       id: bus.id,
@@ -189,23 +204,67 @@ const getSchedules = async (req, res) => {
         },
         {
           model: Bus,
-          attributes: ['plate_number'],
+          attributes: ['id','plate_number'],
           required: false
-        },
-            {
-              model: User,
-              as: 'driver',
-              attributes: ['full_name'],
-              required: false
-            }
+        }
       ]
     });
+
+    // Collect bus IDs for bulk assignment lookup
+    const busIds = schedules.map(s => s.bus_id).filter(Boolean);
+    let assignmentMap = {};
+    if (busIds.length > 0) {
+      const DriverAssignment = require('../models').DriverAssignment || require('../models/DriverAssignment');
+      // Load current assignments for these buses (unassigned_at IS NULL)
+      const assignments = await DriverAssignment.findAll({ where: { bus_id: busIds, unassigned_at: null }, include: [{ model: require('../models').Driver, required: false }] });
+      // Map bus_id -> assignment
+      assignments.forEach(a => {
+        if (a && a.bus_id) assignmentMap[a.bus_id] = a;
+      });
+    }
+
+    // Collect user ids referenced by assignments (from Driver.user_id or assignment.driver_id if it points to users)
+    const userIds = new Set();
+    Object.values(assignmentMap).forEach(a => {
+      if (!a) return;
+      const drv = a.Driver;
+      if (drv && drv.user_id) userIds.add(drv.user_id);
+      // also consider assignment.driver_id might be canonical user id in some setups
+      if (a.driver_id && a.driver_id.length === 36) userIds.add(a.driver_id);
+    });
+
+    const userIdArr = Array.from(userIds);
+    let usersById = {};
+    if (userIdArr.length > 0) {
+      const users = await User.findAll({ where: { id: userIdArr }, attributes: ['id','full_name'] });
+      users.forEach(u => { usersById[u.id] = u; });
+    }
 
     const mapped = schedules.map(s => {
       const price = parseFloat(s.price_per_seat || s.price || 0);
       const bookedSeats = s.booked_seats || 0;
       const availableSeats = s.available_seats ?? s.seats_available ?? 0;
       const totalSeats = s.total_seats || (bookedSeats + availableSeats) || 0;
+
+      // resolve driver name from current assignment for this schedule's bus
+      let driverName = null;
+      try {
+        const assignment = s.bus_id ? assignmentMap[s.bus_id] : null;
+        if (assignment) {
+          // priority: canonical user joined via Driver.user_id -> User.full_name
+          const drv = assignment.Driver;
+          if (drv && drv.user_id && usersById[drv.user_id]) {
+            driverName = usersById[drv.user_id].full_name;
+          } else if (assignment.driver_id && usersById[assignment.driver_id]) {
+            driverName = usersById[assignment.driver_id].full_name;
+          } else if (drv && drv.name) {
+            driverName = drv.name;
+          }
+        }
+      } catch (e) {
+        console.warn('Error resolving driver name for schedule', s.id, e);
+      }
+
       return {
         id: s.id,
         routeFrom: s.Route?.origin || s.route_from || s.from || 'N/A',
@@ -218,11 +277,12 @@ const getSchedules = async (req, res) => {
         totalSeats,
         bookedSeats,
         busPlateNumber: s.Bus?.plate_number || null,
-        driverName: s.Driver?.name || null,
+        driverName: driverName || null,
         status: s.status || 'scheduled',
         revenue: bookedSeats * price
       };
     });
+
     res.json({ schedules: mapped });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -389,20 +449,34 @@ const getDrivers = async (req, res) => {
   }
 };
 
+// Helper to accept frontend IDs like "legacy-<id>" and return normalized id
+const parseDriverIdParam = (paramId) => {
+  if (!paramId || typeof paramId !== 'string') return { isLegacy: false, id: paramId };
+  if (paramId.startsWith('legacy-')) {
+    return { isLegacy: true, id: paramId.slice('legacy-'.length) };
+  }
+  return { isLegacy: false, id: paramId };
+};
+
 const getDriver = async (req, res) => {
   try {
     const userId = req.userId;
     const companyId = req.companyId || (await User.findByPk(userId)).company_id;
     if (!companyId) return res.status(403).json({ error: 'No company associated with user' });
 
-    // Try canonical User driver first
-    const driverUser = await User.findByPk(req.params.id);
-    if (driverUser && driverUser.role === 'driver' && driverUser.company_id === companyId) {
-      return res.json({ driver: { id: driverUser.id, name: driverUser.full_name, license: null, phone: driverUser.phone_number, email: driverUser.email || null } });
+    // Normalize param (frontend may send legacy-<id> for legacy drivers)
+    const { isLegacy, id: rawId } = parseDriverIdParam(req.params.id);
+
+    if (!isLegacy) {
+      // Try canonical User driver first
+      const driverUser = await User.findByPk(rawId);
+      if (driverUser && driverUser.role === 'driver' && driverUser.company_id === companyId) {
+        return res.json({ driver: { id: driverUser.id, name: driverUser.full_name, license: null, phone: driverUser.phone_number, email: driverUser.email || null } });
+      }
     }
 
-    // Fallback to legacy Driver table
-    const driver = await Driver.findByPk(req.params.id);
+    // Fallback to legacy Driver table (use rawId for lookup)
+    const driver = await Driver.findByPk(rawId);
     if (!driver || driver.company_id !== companyId) return res.status(404).json({ error: 'Driver not found' });
 
     const mapped = {
@@ -431,17 +505,20 @@ const createDriver = async (req, res) => {
     // Create canonical User account for driver with generated password if email not provided
     const generatedEmail = email || `driver+${Date.now()}@local.invalid`;
     const generatedPassword = crypto.randomBytes(12).toString('hex');
+    const bcrypt = require('bcryptjs');
+    const hashed = await bcrypt.hash(generatedPassword, 10);
 
+    // Create user with pre-hashed password and disable model hooks to avoid double-hashing
     const newUser = await User.create({
       email: generatedEmail,
-      password: generatedPassword,
+      password: hashed,
       full_name: name,
       phone_number: phone || null,
       role: 'driver',
       company_id: companyId,
       email_verified: false,
       must_change_password: true
-    });
+    }, { hooks: false });
 
     // Keep legacy Driver table in sync for compatibility
     const legacy = await Driver.create({ company_id: companyId, name, license_number: license, phone, is_active: true });
@@ -469,7 +546,10 @@ const createDriver = async (req, res) => {
       buses: []
     };
 
-    res.status(201).json({ driver: mapped });
+   res.status(201).json({
+  driver: mapped,
+  temporaryPassword: generatedPassword
+});
   } catch (error) {
     console.error('createDriver error:', error);
     // Handle common Sequelize unique constraint for license numbers
@@ -486,30 +566,34 @@ const updateDriver = async (req, res) => {
     const companyId = req.companyId || (await User.findByPk(userId)).company_id;
     if (!companyId) return res.status(403).json({ error: 'No company associated with user' });
 
-    const driverId = req.params.id;
-    // Try updating canonical User driver first
-    const driverUser = await User.findByPk(driverId);
-    if (driverUser && driverUser.role === 'driver' && driverUser.company_id === companyId) {
-      const { name, phone, email } = req.body;
-      if (!name) return res.status(400).json({ error: 'Name is required' });
-      driverUser.full_name = name;
-      driverUser.phone_number = phone || driverUser.phone_number;
-      driverUser.email = email || driverUser.email;
-      await driverUser.save();
-      return res.json({ driver: { id: driverUser.id, name: driverUser.full_name, license: null, phone: driverUser.phone_number, email: driverUser.email } });
+    // Normalize param to support legacy-<id>
+    const { isLegacy, id: rawId } = parseDriverIdParam(req.params.id);
+
+    if (!isLegacy) {
+      // Try updating canonical User driver first
+      const driverUser = await User.findByPk(rawId);
+      if (driverUser && driverUser.role === 'driver' && driverUser.company_id === companyId) {
+        const { name, phone, email } = req.body;
+        if (!name) return res.status(400).json({ error: 'Name is required' });
+        driverUser.full_name = name;
+        driverUser.phone_number = phone || driverUser.phone_number;
+        driverUser.email = email || driverUser.email;
+        await driverUser.save();
+        return res.json({ driver: { id: driverUser.id, name: driverUser.full_name, license: null, phone: driverUser.phone_number, email: driverUser.email } });
+      }
     }
 
     // Fallback to legacy Driver
-    const driver = await Driver.findByPk(driverId);
+    const driver = await Driver.findByPk(rawId);
     if (!driver || driver.company_id !== companyId) return res.status(404).json({ error: 'Driver not found' });
 
     const { name, license, phone, email } = req.body;
     if (!name || !license) return res.status(400).json({ error: 'Name and license are required' });
 
-    const existingLicense = await Driver.findOne({ where: { license_number: license, id: { [Op.ne]: driverId } } });
+    const existingLicense = await Driver.findOne({ where: { license_number: license, id: { [Op.ne]: rawId } } });
     if (existingLicense) return res.status(400).json({ error: 'License number already in use' });
 
-    const existingPhone = phone ? await Driver.findOne({ where: { company_id: companyId, phone, id: { [Op.ne]: driverId } } }) : null;
+    const existingPhone = phone ? await Driver.findOne({ where: { company_id: companyId, phone, id: { [Op.ne]: rawId } } }) : null;
     if (existingPhone) return res.status(400).json({ error: 'Phone number already in use for this company' });
 
     driver.name = name;
@@ -531,23 +615,31 @@ const deleteDriver = async (req, res) => {
     const companyId = req.companyId || (await User.findByPk(userId)).company_id;
     if (!companyId) return res.status(403).json({ error: 'No company associated with user' });
 
-    const driverId = req.params.id;
-    // Try canonical User driver first
-    const driverUser = await User.findByPk(driverId);
-    if (driverUser && driverUser.role === 'driver' && driverUser.company_id === companyId) {
-      const assignedBus = await Bus.findOne({ where: { driver_id: driverId } });
-      if (assignedBus) return res.status(400).json({ error: 'Cannot delete driver assigned to a bus' });
-      await driverUser.destroy();
-      return res.json({ message: 'Driver deleted', driverId });
+    // Normalize param to support legacy-<id>
+    const { isLegacy, id: rawId } = parseDriverIdParam(req.params.id);
+
+    if (!isLegacy) {
+      // Try canonical User driver first
+      const driverUser = await User.findByPk(rawId);
+      if (driverUser && driverUser.role === 'driver' && driverUser.company_id === companyId) {
+        // Check active assignments both on buses and driver_assignments table
+        const assignedBus = await Bus.findOne({ where: { driver_id: rawId } });
+        const activeAssignment = await DriverAssignment.findOne({ where: { driver_id: rawId, unassigned_at: null } });
+        if (assignedBus || activeAssignment) return res.status(400).json({ error: 'Cannot delete driver assigned to a bus or active assignment exists' });
+        await driverUser.destroy();
+        return res.json({ message: 'Driver deleted', driverId: rawId });
+      }
     }
 
     // Fallback to legacy
-    const driver = await Driver.findByPk(driverId);
+    const driver = await Driver.findByPk(rawId);
     if (!driver || driver.company_id !== companyId) return res.status(404).json({ error: 'Driver not found' });
-    const assignedBus = await Bus.findOne({ where: { driver_id: driverId } });
-    if (assignedBus) return res.status(400).json({ error: 'Cannot delete driver assigned to a bus' });
-    await Driver.destroy({ where: { id: driverId } });
-    res.json({ message: 'Driver deleted', driverId });
+    // Check active assignments for legacy driver id
+    const assignedBusLegacy = await Bus.findOne({ where: { driver_id: rawId } });
+    const activeAssignmentLegacy = await DriverAssignment.findOne({ where: { driver_id: rawId, unassigned_at: null } });
+    if (assignedBusLegacy || activeAssignmentLegacy) return res.status(400).json({ error: 'Cannot delete driver assigned to a bus or active assignment exists' });
+    await Driver.destroy({ where: { id: rawId } });
+    res.json({ message: 'Driver deleted', driverId: rawId });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }

@@ -7,6 +7,7 @@ function roleHomePath(role) {
     case 'driver':
       return '/driver/dashboard';
     case 'company_admin':
+    case 'company': // legacy/alternate role value
       return '/company/dashboard';
     case 'commuter':
       return '/dashboard/commuter';

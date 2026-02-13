@@ -4,7 +4,7 @@ const { Op } = require('sequelize');
 const VALID_LAYOUTS = ['25','30','50'];
 
 const listBuses = async (companyId) => {
-  return await Bus.findAll({ where: { company_id: companyId } });
+  return await Bus.findAll({ where: { company_id: companyId }, include: [{ model: User, as: 'driver', attributes: ['id','full_name'] }] });
 };
 
 const getBus = async (companyId, id) => {
@@ -16,6 +16,12 @@ const getBus = async (companyId, id) => {
 const createBus = async (companyId, payload, options = {}) => {
   console.log('busService.createBus called', { companyId, payload });
   const { plate_number, capacity, model, seat_layout, driver_id } = payload;
+
+  // Basic UUID validation for driver_id to avoid passing invalid legacy ids/indexes to DB
+  const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+  if (driver_id && !uuidRegex.test(String(driver_id))) {
+    throw new Error('Invalid driver selected');
+  }
 
   if (!plate_number) throw new Error('Plate number is required');
   if (!capacity || !Number.isInteger(Number(capacity)) || Number(capacity) <= 0) throw new Error('Invalid capacity');
@@ -116,6 +122,11 @@ const updateBus = async (companyId, id, payload, options = {}) => {
 
     // driver assignment handled carefully
     if (payload.driver_id !== undefined) {
+      // Validate driver_id format
+      const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+      if (payload.driver_id !== null && !uuidRegex.test(String(payload.driver_id))) {
+        throw new Error('Invalid driver selected');
+      }
       // handle assignment/unassignment in a transaction to ensure consistency
       if (payload.driver_id === null) {
         updates.driver_id = null;

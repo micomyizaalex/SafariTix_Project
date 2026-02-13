@@ -9,6 +9,7 @@ export function getHomePath(user: { role?: string; homePath?: string } | null): 
     case 'driver':
       return '/driver/dashboard';
     case 'company_admin':
+    case 'company': // some users/older accounts may use 'company' as role
       return '/company/dashboard';
     case 'admin':
       return '/dashboard/admin';

@@ -79,6 +79,9 @@ const App = () => {
               <Route index element={<RequireRole allowed={["driver"]}><DriverDashboard/></RequireRole>} />
               <Route path='tracking' element={<RequireRole allowed={["driver"]}><DriverTracking/></RequireRole>} />
             </Route>
+            <Route path='/company/dashboard' element={<Layout />}>
+              <Route index element={<RequireRole allowed={["company_admin","company"]}><CompanyDashboard/></RequireRole>} />
+            </Route>
             {/* Tailwind test route */}
             <Route path='/tailwind-test' element={<Layout />}>
               <Route index element={<TailwindExample/>} />

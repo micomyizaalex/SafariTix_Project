@@ -1,4 +1,7 @@
 import React, { useState } from 'react';
+import { useAuth } from '../../components/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import SuccessPopup from '../../components/SuccessPopup';
 import {
   LayoutDashboard,
   Bus,
@@ -92,11 +95,8 @@ const recentTickets = [
   { id: 'TKT-1242', passenger: 'Alice Nzabonimana', route: 'Butare → Huye', date: '2024-02-11', amount: 2800, status: 'confirmed' },
 ];
 
-const activeBuses = [
-  { id: 'RAB-101A', driver: 'John Kamau', route: 'Kigali → Gisenyi', status: 'on-route', eta: '30 min', occupancy: 92 },
-  { id: 'RAB-202B', driver: 'Mary Uwase', route: 'Kigali → Butare', status: 'on-route', eta: '45 min', occupancy: 88 },
-  { id: 'RAB-303C', driver: 'Peter Mugabe', route: 'Kigali → Musanze', status: 'boarding', eta: '15 min', occupancy: 75 },
-];
+// Active buses will be loaded from backend and computed from schedules
+// state: array of { id, plateNumber, driverName, route, occupancy, eta }
 
 const notifications = [
   { id: 1, type: 'alert', message: 'Bus RAB-202B scheduled for maintenance today', time: '10 min ago' },
@@ -108,6 +108,8 @@ export default function CompanyDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeSection, setActiveSection] = useState('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
 
   // Read logged-in user (stored by login/signup) from localStorage
   let storedUser = null;
@@ -142,6 +144,95 @@ export default function CompanyDashboard() {
     todaysRevenue: 0,
     todaysTickets: 0
   });
+
+  const [activeBusesList, setActiveBusesList] = React.useState<any[]>([]);
+
+  React.useEffect(() => {
+    let mounted = true;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    const headers = token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+
+    async function loadActiveBuses() {
+      try {
+        const [bRes, sRes] = await Promise.all([
+          fetch('/api/company/buses', { headers }),
+          fetch('/api/company/schedules', { headers })
+        ]);
+
+        if (!mounted) return;
+
+        const busesJson = bRes.ok ? await bRes.json() : { buses: [] };
+        const schedulesJson = sRes.ok ? await sRes.json() : { schedules: [] };
+
+        const buses = busesJson.buses || [];
+        const schedules = schedulesJson.schedules || [];
+
+        // For each active bus, find its next upcoming schedule (today or future)
+        const now = new Date();
+        const byBus = {} as Record<string, any[]>;
+        schedules.forEach((sch: any) => {
+          if (!sch || !sch.bus_id) return;
+          byBus[sch.bus_id] = byBus[sch.bus_id] || [];
+          byBus[sch.bus_id].push(sch);
+        });
+
+        const active = buses
+          .filter((b: any) => String(b.status || '').toLowerCase() === 'active')
+          .map((b: any) => {
+            const busSchedules = byBus[b.id] || [];
+            // choose the nearest future schedule
+            let next = null;
+            const parsedNow = now.getTime();
+            busSchedules.forEach((sch: any) => {
+              try {
+                const dateStr = sch.scheduleDate || sch.date || sch.schedule_date;
+                const timeStr = sch.departureTime || sch.departure_time || sch.time;
+                if (!dateStr || !timeStr) return;
+                const dt = new Date(dateStr + 'T' + timeStr);
+                const diff = dt.getTime() - parsedNow;
+                if (diff >= -1000) { // allow slight past
+                  if (!next || diff < next.diff) next = { sch, dt, diff };
+                }
+              } catch (e) { /* ignore parse errors */ }
+            });
+
+            // compute occupancy and ETA
+            let occupancy = null;
+            let eta = '—';
+            if (next && next.sch) {
+              const sch = next.sch;
+              const seatsAvailable = sch.seatsAvailable != null ? sch.seatsAvailable : (sch.seats_available ?? null);
+              const totalSeats = sch.totalSeats || sch.total_seats || null;
+              if (totalSeats && seatsAvailable != null && totalSeats > 0) {
+                occupancy = Math.round(((totalSeats - seatsAvailable) / totalSeats) * 100);
+              }
+              if (next.diff != null) {
+                const mins = Math.max(0, Math.round(next.diff / 60000));
+                eta = mins <= 0 ? 'Now' : `${mins} min`;
+              }
+            }
+
+            const route = (next && next.sch) ? ((next.sch.routeFrom || '') + ' → ' + (next.sch.routeTo || '')) : (b.route || '—');
+
+            return {
+              id: b.plateNumber || b.id || b.plate_number,
+              plate: b.plateNumber || b.plate_number || b.id,
+              driver: b.driverName || (b.driver && (b.driver.full_name || b.driver.name)) || '—',
+              route,
+              occupancy: occupancy != null ? occupancy : '—',
+              eta
+            };
+          });
+
+        setActiveBusesList(active);
+      } catch (err) {
+        console.warn('Failed to load active buses', err);
+      }
+    }
+
+    loadActiveBuses();
+    return () => { mounted = false; };
+  }, []);
 
   React.useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
@@ -261,7 +352,7 @@ export default function CompanyDashboard() {
 
         {/* Logout Button */}
         <div className="absolute bottom-0 left-0 right-0 p-3">
-          <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-300 hover:bg-red-500/20 hover:text-red-400 transition-all duration-300 font-medium text-sm">
+          <button onClick={() => { signOut(); navigate('/app/login', { replace: true }); }} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-300 hover:bg-red-500/20 hover:text-red-400 transition-all duration-300 font-medium text-sm">
             <LogOut className="w-5 h-5 flex-shrink-0" />
             {sidebarOpen && <span>Logout</span>}
           </button>
@@ -330,7 +421,7 @@ export default function CompanyDashboard() {
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-8">
-          {activeSection === 'dashboard' && <DashboardOverview kpis={kpis} />}
+          {activeSection === 'dashboard' && <DashboardOverview kpis={kpis} activeBusesList={activeBusesList} />}
           {activeSection === 'buses' && <BusesSection />}
           {activeSection === 'drivers' && <DriversSection />}
           {activeSection === 'schedules' && <SchedulesSection />}
@@ -345,8 +436,9 @@ export default function CompanyDashboard() {
 }
 
 // Dashboard Overview Component
-function DashboardOverview({ kpis }: { kpis: any }) {
+function DashboardOverview({ kpis, activeBusesList }: { kpis: any; activeBusesList?: any[] }) {
   kpis = kpis || { totalBuses: 0, activeBuses: 0, activeRoutes: 0, activeDrivers: 0, todaysRevenue: 0, todaysTickets: 0 };
+  activeBusesList = activeBusesList || [];
   return (
     <div className="space-y-6">
       {/* Page Title */}
@@ -478,10 +570,6 @@ function DashboardOverview({ kpis }: { kpis: any }) {
             ))}
           </div>
         </div>
-      </div>
-
-      {/* Recent Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Active Buses */}
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
           <div className="flex items-center justify-between mb-6">
@@ -493,20 +581,20 @@ function DashboardOverview({ kpis }: { kpis: any }) {
             </button>
           </div>
           <div className="space-y-4">
-            {activeBuses.map((bus) => (
+            {activeBusesList.map((bus) => (
               <div key={bus.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-gradient-to-br from-[#0077B6] to-[#005F8E] rounded-xl flex items-center justify-center">
                     <Bus className="w-6 h-6 text-white" />
                   </div>
                   <div>
-                    <div className="font-semibold text-gray-900">{bus.id}</div>
+                    <div className="font-semibold text-gray-900">{bus.plate}</div>
                     <div className="text-sm text-gray-600">{bus.driver}</div>
                     <div className="text-xs text-gray-500 mt-1">{bus.route}</div>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-sm font-semibold text-[#27AE60]">{bus.occupancy}%</div>
+                  <div className="text-sm font-semibold text-[#27AE60]">{typeof bus.occupancy === 'number' ? `${bus.occupancy}%` : bus.occupancy}</div>
                   <div className="text-xs text-gray-500 mt-1">ETA: {bus.eta}</div>
                 </div>
               </div>
@@ -609,10 +697,101 @@ function KPICard({ title, value, change, trend, icon: Icon, color, subtitle }) {
 
 // Placeholder sections - to be implemented
 function BusesSection() {
+  const [buses, setBuses] = React.useState<any[]>([]);
+  const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
+  const [drivers, setDrivers] = React.useState<any[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [showAddBus, setShowAddBus] = React.useState(false);
+  const [showEditBus, setShowEditBus] = React.useState(false);
+  const [editBus, setEditBus] = React.useState<any | null>(null);
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+
+  React.useEffect(() => {
+    let mounted = true;
+    const headers = token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+    async function load() {
+      try {
+        const [busesRes, driversRes] = await Promise.all([
+          fetch('/api/company/buses', { headers }),
+          fetch('/api/company/drivers', { headers }),
+        ]);
+        if (!mounted) return;
+
+        if (!busesRes.ok) {
+          const txt = await busesRes.text().catch(() => null);
+          setErrorMsg(txt || `Failed to load buses: ${busesRes.status}`);
+          setBuses([]);
+        } else {
+          const busesJson = await busesRes.json();
+          setBuses(busesJson.buses || []);
+        }
+
+        if (!driversRes.ok) {
+          setDrivers([]);
+        } else {
+          const driversJson = await driversRes.json();
+          setDrivers(driversJson.drivers || []);
+        }
+      } catch (err) {
+        console.warn('Failed to load buses or drivers', err);
+        if (mounted) {
+          setBuses([]);
+          setDrivers([]);
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+    load();
+    return () => { mounted = false; };
+  }, []);
+
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm">
-      <h2 className="text-2xl font-['Montserrat'] font-bold text-[#2B2D42] mb-4">Buses Management</h2>
-      <p className="text-gray-600">Bus fleet management interface coming soon...</p>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-['Montserrat'] font-bold text-[#2B2D42]">Buses Management</h2>
+        <button onClick={() => setShowAddBus(true)} className="px-3 py-2 bg-[#0077B6] text-white rounded-md">Add Bus</button>
+      </div>
+
+      {loading ? (
+        <div className="text-sm text-gray-500">Loading buses...</div>
+      ) : errorMsg ? (
+        <div className="text-sm text-red-500">{errorMsg}</div>
+      ) : buses.length === 0 ? (
+        <div className="text-sm text-gray-500">No buses found for this company.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full table-auto border-collapse">
+            <thead>
+              <tr className="text-left">
+                <th className="px-3 py-2 border-b">Plate</th>
+                <th className="px-3 py-2 border-b">Model</th>
+                <th className="px-3 py-2 border-b">Capacity</th>
+                <th className="px-3 py-2 border-b">Driver</th>
+                <th className="px-3 py-2 border-b">Status</th>
+                <th className="px-3 py-2 border-b">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {buses.map((b) => (
+                <tr key={b.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 border-b">{b.plate_number || b.plateNumber || b.id}</td>
+                  <td className="px-3 py-2 border-b">{b.model || b.make || '—'}</td>
+                  <td className="px-3 py-2 border-b">{b.capacity || '—'}</td>
+                  <td className="px-3 py-2 border-b">{b.driverName || (b.driver && (b.driver.full_name || b.driver.name)) || b.driver_id || '—'}</td>
+                  <td className="px-3 py-2 border-b">{b.status ? String(b.status) : '—'}</td>
+                  <td className="px-3 py-2 border-b">
+                    <button onClick={() => { setShowEditBus(true); setEditBus(b); }} className="px-2 py-1 bg-gray-100 rounded">Edit</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showAddBus && <AddBusModal token={token} drivers={drivers} onClose={() => setShowAddBus(false)} onCreated={() => { setShowAddBus(false); window.location.reload(); }} />}
+      {showEditBus && editBus && <EditBusModal token={token} drivers={drivers} bus={editBus} onClose={() => { setShowEditBus(false); setEditBus(null); }} onUpdated={() => { setShowEditBus(false); setEditBus(null); window.location.reload(); }} />}
     </div>
   );
 }
@@ -622,6 +801,9 @@ function DriversSection() {
   const [loading, setLoading] = React.useState(true);
   const [selected, setSelected] = React.useState<any>(null);
   const [showAddDriver, setShowAddDriver] = React.useState(false);
+  const [showEditDriver, setShowEditDriver] = React.useState(false);
+  const [editDriver, setEditDriver] = React.useState<any | null>(null);
+  const [successPopup, setSuccessPopup] = React.useState<{ open: boolean; tempPassword?: string | null; message?: string | null }>({ open: false, tempPassword: null, message: null });
   const [selectedIds, setSelectedIds] = React.useState<Record<string, boolean>>({});
   const [selectAll, setSelectAll] = React.useState(false);
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
@@ -676,7 +858,6 @@ function DriversSection() {
                     setSelectedIds({});
                   }
                 }} /></th>
-                <th className="px-3 py-2 border-b">ID</th>
                 <th className="px-3 py-2 border-b">Name</th>
                 <th className="px-3 py-2 border-b">Email</th>
                 <th className="px-3 py-2 border-b">Phone</th>
@@ -690,20 +871,37 @@ function DriversSection() {
               {drivers.map((d) => (
                 <tr key={d.id} className="hover:bg-gray-50">
                   <td className="px-3 py-2 border-b">
-                    <input type="checkbox" checked={!!selectedIds[String(d.id)]} onChange={(e) => {
-                      const next = { ...selectedIds, [String(d.id)]: e.target.checked };
+                    <input type="checkbox" checked={!!selectedIds[String(d.id || '')]} onChange={(e) => {
+                      const next = { ...selectedIds, [String(d.id || '')]: e.target.checked };
                       setSelectedIds(next);
                       if (!e.target.checked) setSelectAll(false);
                     }} />
                   </td>
-                  <td className="px-3 py-2 border-b">{d.id}</td>
                   <td className="px-3 py-2 border-b">{d.name}</td>
                   <td className="px-3 py-2 border-b">{d.email || '—'}</td>
                   <td className="px-3 py-2 border-b">{d.phone || '—'}</td>
                   <td className="px-3 py-2 border-b">{d.license || '—'}</td>
                   <td className="px-3 py-2 border-b">{d.available ? 'Yes' : 'No'}</td>
                   <td className="px-3 py-2 border-b">{(d.buses || []).length}</td>
-                  <td className="px-3 py-2 border-b"><button onClick={() => setSelected(d)} className="px-2 py-1 bg-gray-100 rounded">View</button></td>
+                  <td className="px-3 py-2 border-b flex gap-2">
+                    <button onClick={() => setSelected(d)} className="px-2 py-1 bg-gray-100 rounded">View</button>
+                    <button onClick={() => { setEditDriver(d); setShowEditDriver(true); }} className="px-2 py-1 bg-blue-100 rounded">Edit</button>
+                    <button onClick={async () => {
+                      if (!confirm('Delete this driver? This cannot be undone.')) return;
+                      try {
+                        const headers = token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+                        const res = await fetch(`/api/company/drivers/${d.id}`, { method: 'DELETE', headers });
+                        if (!res.ok) {
+                          const txt = await res.text().catch(() => null);
+                          throw new Error(txt || `Failed to delete driver: ${res.status}`);
+                        }
+                        // refresh list
+                        window.location.reload();
+                      } catch (err) {
+                        alert('Failed to delete driver: ' + (err && err.message ? err.message : err));
+                      }
+                    }} className="px-2 py-1 bg-red-100 text-red-700 rounded">Delete</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -712,7 +910,15 @@ function DriversSection() {
       )}
 
       {selected && <DriverModal driver={selected} onClose={() => setSelected(null)} />}
-      {showAddDriver && <AddDriverModal onClose={() => { setShowAddDriver(false); window.location.reload(); }} token={token} />}
+      {showAddDriver && <AddDriverModal onClose={() => setShowAddDriver(false)} token={token} onCreated={(driver: any, tempPassword: string) => {
+        // Close create modal and show success popup with temporary password
+        setShowAddDriver(false);
+        setSuccessPopup({ open: true, tempPassword, message: 'Driver created successfully' });
+      }} />}
+      {showEditDriver && editDriver && <EditDriverModal token={token} driver={editDriver} onClose={() => { setShowEditDriver(false); setEditDriver(null); }} onUpdated={() => { setShowEditDriver(false); setEditDriver(null); window.location.reload(); }} />}
+
+      {/* Success popup shown after creation */}
+      <>{successPopup.open && <SuccessPopup isOpen={successPopup.open} title="Driver created" message={successPopup.message || ''} tempPassword={successPopup.tempPassword || ''} onClose={() => { setSuccessPopup({ open: false, tempPassword: null, message: null }); window.location.reload(); }} />}</>
     </div>
   );
 }
@@ -747,10 +953,100 @@ function DriverModal({ driver, onClose }: { driver: any; onClose: () => void }) 
 }
 
 function SchedulesSection() {
+  const [schedules, setSchedules] = React.useState<any[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [showAdd, setShowAdd] = React.useState(false);
+  const [buses, setBuses] = React.useState<any[]>([]);
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+
+  React.useEffect(() => {
+    let mounted = true;
+    const headers = token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+
+    async function load() {
+      try {
+        const [sRes, busesRes] = await Promise.all([
+          fetch('/api/company/schedules', { headers }),
+          fetch('/api/company/buses', { headers }),
+        ]);
+
+        if (!mounted) return;
+
+        if (!sRes.ok) {
+          const txt = await sRes.text().catch(() => null);
+          setError(txt || `Failed to load schedules: ${sRes.status}`);
+          setSchedules([]);
+        } else {
+          const j = await sRes.json();
+          setSchedules(j.schedules || []);
+        }
+
+        if (busesRes.ok) {
+          const jb = await busesRes.json();
+          setBuses(jb.buses || []);
+        } else {
+          setBuses([]);
+        }
+      } catch (err) {
+        console.warn('Failed to load schedules', err);
+        if (mounted) setError('Failed to load schedules');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    load();
+    return () => { mounted = false; };
+  }, []);
+
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm">
-      <h2 className="text-2xl font-['Montserrat'] font-bold text-[#2B2D42] mb-4">Schedules Management</h2>
-      <p className="text-gray-600">Schedule management interface coming soon...</p>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-['Montserrat'] font-bold text-[#2B2D42]">Schedules Management</h2>
+        <button onClick={() => setShowAdd(true)} className="px-3 py-2 bg-[#0077B6] text-white rounded-md">Create Schedule</button>
+      </div>
+
+      {loading ? (
+        <div className="text-sm text-gray-500">Loading schedules...</div>
+      ) : error ? (
+        <div className="text-sm text-red-500">{error}</div>
+      ) : schedules.length === 0 ? (
+        <div className="text-sm text-gray-500">No schedules found.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full table-auto border-collapse">
+            <thead>
+              <tr className="text-left">
+                <th className="px-3 py-2 border-b">Date</th>
+                <th className="px-3 py-2 border-b">Route</th>
+                <th className="px-3 py-2 border-b">Bus</th>
+                <th className="px-3 py-2 border-b">Departure</th>
+                <th className="px-3 py-2 border-b">Arrival</th>
+                <th className="px-3 py-2 border-b">Seats</th>
+                <th className="px-3 py-2 border-b">Price</th>
+                <th className="px-3 py-2 border-b">Driver</th>
+              </tr>
+            </thead>
+            <tbody>
+              {schedules.map((s) => (
+                <tr key={s.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 border-b">{s.scheduleDate || s.date || s.schedule_date || '—'}</td>
+                  <td className="px-3 py-2 border-b">{(s.routeFrom || '—') + ' → ' + (s.routeTo || '—')}</td>
+                  <td className="px-3 py-2 border-b">{s.busPlateNumber || (s.Bus && (s.Bus.plate_number || s.Bus.plateNumber)) || '—'}</td>
+                  <td className="px-3 py-2 border-b">{s.departureTime || '—'}</td>
+                  <td className="px-3 py-2 border-b">{s.arrivalTime || '—'}</td>
+                  <td className="px-3 py-2 border-b">{(s.seatsAvailable != null ? s.seatsAvailable : s.seats_available) + '/' + (s.totalSeats || s.total_seats || '—')}</td>
+                  <td className="px-3 py-2 border-b">{s.price ? `RWF ${s.price}` : '—'}</td>
+                  <td className="px-3 py-2 border-b">{s.driverName || (s.driver && (s.driver.full_name || s.driver.name)) || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showAdd && <AddScheduleModal token={token} buses={buses} onClose={() => { setShowAdd(false); window.location.reload(); }} />}
     </div>
   );
 }
@@ -791,7 +1087,7 @@ function SettingsSection() {
   );
 }
 
-function AddDriverModal({ onClose, token }: { onClose: () => void; token: string | null }) {
+function AddDriverModal({ onClose, token, onCreated }: { onClose: () => void; token: string | null; onCreated?: (driver: any, tempPassword: string) => void }) {
   const [fullName, setFullName] = React.useState('');
   const [email, setEmail] = React.useState('');
   const [phone, setPhone] = React.useState('');
@@ -824,6 +1120,8 @@ function AddDriverModal({ onClose, token }: { onClose: () => void; token: string
 
       const j = await res.json();
       if (!j || j.error) throw new Error(j?.error || 'Failed to create driver');
+      // Trigger parent callback with temporary password so frontend can show it
+      if (onCreated) onCreated(j.driver, j.temporaryPassword);
       onClose();
     } catch (err: any) {
       setError(err.message || 'Error');
@@ -861,6 +1159,321 @@ function AddDriverModal({ onClose, token }: { onClose: () => void; token: string
           <div className="flex justify-end gap-2">
             <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 rounded">Cancel</button>
             <button type="submit" disabled={saving} className="px-4 py-2 bg-[#0077B6] text-white rounded">{saving ? 'Saving...' : 'Create Driver'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AddBusModal({ onClose, token, drivers, onCreated }: { onClose: () => void; token: string | null; drivers: any[]; onCreated?: () => void }) {
+  const [plate, setPlate] = React.useState('');
+  const [model, setModel] = React.useState('');
+  const [capacity, setCapacity] = React.useState('30');
+  const [driverId, setDriverId] = React.useState<string | null>(null);
+  const [error, setError] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  const selectableDrivers = React.useMemo(() => drivers.filter(d => !(String(d.id || '').startsWith('legacy-'))), [drivers]);
+
+  const submit = async (e: any) => {
+    e.preventDefault();
+    setError('');
+    if (!plate || !driverId) { setError('Plate number and driver selection are required'); return; }
+    // Validate driverId looks like a UUID (prevent sending numeric indices)
+    const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+    if (driverId && !uuidRegex.test(driverId)) { setError('Invalid driver selected'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/company/buses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ plate_number: plate, model, capacity: parseInt(capacity, 10) || 30, driver_id: driverId })
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => null);
+        throw new Error((text && text.slice ? text.slice(0, 1000) : `Request failed with status ${res.status}`) || 'Failed to create bus');
+      }
+      if (onCreated) onCreated();
+      onClose();
+    } catch (err: any) {
+      setError(err.message || 'Error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
+      <div className="relative bg-white rounded-2xl p-6 w-[520px] shadow-lg">
+        <div className="flex items-start justify-between mb-4">
+          <h3 className="text-lg font-semibold">Add Bus</h3>
+          <button onClick={onClose} className="text-gray-500">Close</button>
+        </div>
+        {error && <div className="text-red-600 mb-2">{error}</div>}
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className="block text-sm mb-1">Plate number</label>
+            <input value={plate} onChange={e => setPlate(e.target.value)} type="text" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Model</label>
+            <input value={model} onChange={e => setModel(e.target.value)} type="text" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Capacity</label>
+            <input value={capacity} onChange={e => setCapacity(e.target.value)} type="number" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Assign Driver</label>
+            {selectableDrivers.length === 0 ? (
+              <div className="text-sm text-gray-500">No assignable drivers available. Create a driver first.</div>
+            ) : (
+              <select value={driverId || ''} onChange={e => setDriverId(e.target.value || null)} className="w-full border rounded px-3 py-2">
+                <option value="">-- Select driver --</option>
+                {selectableDrivers.map(d => (<option key={d.id} value={d.id}>{d.name || d.full_name || d.email || d.id}</option>))}
+              </select>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 rounded">Cancel</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 bg-[#0077B6] text-white rounded">{saving ? 'Saving...' : 'Create Bus'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AddScheduleModal({ onClose, token, buses }: { onClose: () => void; token: string | null; buses: any[] }) {
+  const [routeFrom, setRouteFrom] = React.useState('');
+  const [routeTo, setRouteTo] = React.useState('');
+  const [date, setDate] = React.useState('');
+  const [departureTime, setDepartureTime] = React.useState('');
+  const [arrivalTime, setArrivalTime] = React.useState('');
+  const [price, setPrice] = React.useState('0');
+  const [busId, setBusId] = React.useState<string | null>(null);
+  const [error, setError] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  const submit = async (e: any) => {
+    e.preventDefault();
+    setError('');
+    if (!busId || !routeFrom || !routeTo || !date || !departureTime || !price) { setError('Bus, route, date, departure time and price are required'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/company/schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ busId, routeFrom, routeTo, departureTime, arrivalTime, price: parseFloat(price || '0'), date })
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => null);
+        throw new Error((text && text.slice ? text.slice(0, 1000) : `Request failed with status ${res.status}`) || 'Failed to create schedule');
+      }
+      onClose();
+    } catch (err: any) {
+      setError(err.message || 'Error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
+      <div className="relative bg-white rounded-2xl p-6 w-[640px] shadow-lg">
+        <div className="flex items-start justify-between mb-4">
+          <h3 className="text-lg font-semibold">Create Schedule</h3>
+          <button onClick={onClose} className="text-gray-500">Close</button>
+        </div>
+        {error && <div className="text-red-600 mb-2">{error}</div>}
+        <form onSubmit={submit} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm mb-1">From</label>
+              <input value={routeFrom} onChange={e => setRouteFrom(e.target.value)} type="text" className="w-full border rounded px-3 py-2" />
+            </div>
+            <div>
+              <label className="block text-sm mb-1">To</label>
+              <input value={routeTo} onChange={e => setRouteTo(e.target.value)} type="text" className="w-full border rounded px-3 py-2" />
+            </div>
+            <div>
+              <label className="block text-sm mb-1">Date</label>
+              <input value={date} onChange={e => setDate(e.target.value)} type="date" className="w-full border rounded px-3 py-2" />
+            </div>
+            <div>
+              <label className="block text-sm mb-1">Departure Time</label>
+              <input value={departureTime} onChange={e => setDepartureTime(e.target.value)} type="time" className="w-full border rounded px-3 py-2" />
+            </div>
+            <div>
+              <label className="block text-sm mb-1">Arrival Time</label>
+              <input value={arrivalTime} onChange={e => setArrivalTime(e.target.value)} type="time" className="w-full border rounded px-3 py-2" />
+            </div>
+            <div>
+              <label className="block text-sm mb-1">Price (RWF)</label>
+              <input value={price} onChange={e => setPrice(e.target.value)} type="number" className="w-full border rounded px-3 py-2" />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-sm mb-1">Bus</label>
+              <select value={busId || ''} onChange={e => setBusId(e.target.value || null)} className="w-full border rounded px-3 py-2">
+                <option value="">-- Select Bus --</option>
+                {buses.map(b => (<option key={b.id} value={b.id}>{b.plate_number || b.plateNumber || b.id}</option>))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 rounded">Cancel</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 bg-[#0077B6] text-white rounded">{saving ? 'Saving...' : 'Create'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EditBusModal({ onClose, token, drivers, bus, onUpdated }: { onClose: () => void; token: string | null; drivers: any[]; bus: any; onUpdated?: () => void }) {
+  const [plate, setPlate] = React.useState(bus.plate_number || bus.plate || bus.plateNumber || '');
+  const [model, setModel] = React.useState(bus.model || '');
+  const [capacity, setCapacity] = React.useState(String(bus.capacity || '30'));
+  const [driverId, setDriverId] = React.useState<string | null>(bus.driverId || bus.driver_id || (bus.driver && bus.driver.id) || null);
+  const [error, setError] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  const selectableDrivers = React.useMemo(() => drivers.filter(d => !(String(d.id || '').startsWith('legacy-'))), [drivers]);
+
+  const submit = async (e: any) => {
+    e.preventDefault();
+    setError('');
+    if (!plate) { setError('Plate number is required'); return; }
+    const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+    if (driverId && !uuidRegex.test(driverId)) { setError('Invalid driver selected'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/company/buses/${bus.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ plate_number: plate, model, capacity: parseInt(capacity, 10) || 30, driver_id: driverId })
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => null);
+        throw new Error((text && text.slice ? text.slice(0, 1000) : `Request failed with status ${res.status}`) || 'Failed to update bus');
+      }
+      if (onUpdated) onUpdated();
+      onClose();
+    } catch (err: any) {
+      setError(err.message || 'Error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
+      <div className="relative bg-white rounded-2xl p-6 w-[520px] shadow-lg">
+        <div className="flex items-start justify-between mb-4">
+          <h3 className="text-lg font-semibold">Edit Bus</h3>
+          <button onClick={onClose} className="text-gray-500">Close</button>
+        </div>
+        {error && <div className="text-red-600 mb-2">{error}</div>}
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className="block text-sm mb-1">Plate number</label>
+            <input value={plate} onChange={e => setPlate(e.target.value)} type="text" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Model</label>
+            <input value={model} onChange={e => setModel(e.target.value)} type="text" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Capacity</label>
+            <input value={capacity} onChange={e => setCapacity(e.target.value)} type="number" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Assign Driver</label>
+            {selectableDrivers.length === 0 ? (
+              <div className="text-sm text-gray-500">No assignable drivers available. Create a driver first.</div>
+            ) : (
+              <select value={driverId || ''} onChange={e => setDriverId(e.target.value || null)} className="w-full border rounded px-3 py-2">
+                <option value="">-- Select driver --</option>
+                {selectableDrivers.map(d => (<option key={d.id} value={d.id}>{d.name || d.full_name || d.email || d.id}</option>))}
+              </select>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 rounded">Cancel</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 bg-[#0077B6] text-white rounded">{saving ? 'Saving...' : 'Save Changes'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EditDriverModal({ onClose, token, driver, onUpdated }: { onClose: () => void; token: string | null; driver: any; onUpdated?: () => void }) {
+  const [fullName, setFullName] = React.useState(driver.name || driver.full_name || '');
+  const [email, setEmail] = React.useState(driver.email || driver.email || '');
+  const [phone, setPhone] = React.useState(driver.phone || driver.phone_number || '');
+  const [license, setLicense] = React.useState(driver.license || '');
+  const [error, setError] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  const submit = async (e: any) => {
+    e.preventDefault();
+    setError('');
+    if (!fullName || !license) { setError('Name and license number are required'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/company/drivers/${driver.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ name: fullName, email, phone, license })
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => null);
+        throw new Error((text && text.slice ? text.slice(0, 1000) : `Request failed with status ${res.status}`) || 'Failed to update driver');
+      }
+      if (onUpdated) onUpdated();
+      onClose();
+    } catch (err: any) {
+      setError(err.message || 'Error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
+      <div className="relative bg-white rounded-2xl p-6 w-[520px] shadow-lg">
+        <div className="flex items-start justify-between mb-4">
+          <h3 className="text-lg font-semibold">Edit Driver</h3>
+          <button onClick={onClose} className="text-gray-500">Close</button>
+        </div>
+        {error && <div className="text-red-600 mb-2">{error}</div>}
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className="block text-sm mb-1">Full name</label>
+            <input value={fullName} onChange={e => setFullName(e.target.value)} type="text" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Email</label>
+            <input value={email} onChange={e => setEmail(e.target.value)} type="email" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Phone number</label>
+            <input value={phone} onChange={e => setPhone(e.target.value)} type="text" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">License number</label>
+            <input value={license} onChange={e => setLicense(e.target.value)} type="text" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 rounded">Cancel</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 bg-[#0077B6] text-white rounded">{saving ? 'Saving...' : 'Save Changes'}</button>
           </div>
         </form>
       </div>
