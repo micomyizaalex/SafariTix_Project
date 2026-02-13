@@ -125,10 +125,39 @@ const login = async (req, res) => {
     res.json({
       user: { ...safeUser, homePath: roleHomePath(safeUser.role) },
       token,
-      homePath: roleHomePath(safeUser.role)
+      homePath: roleHomePath(safeUser.role),
+      must_change_password: !!user.must_change_password
     });
   } catch (error) {
     res.status(400).json({ error: error.message });
+  }
+};
+
+const changePassword = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { currentPassword, newPassword } = req.body;
+    if (!newPassword || newPassword.length < 8 || !/[0-9]/.test(newPassword) || !/[A-Za-z]/.test(newPassword)) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters and include letters and numbers' });
+    }
+
+    const user = await User.findByPk(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // If user has must_change_password true, allow change without currentPassword verification
+    if (!user.must_change_password) {
+      if (!currentPassword) return res.status(400).json({ error: 'Current password required' });
+      const ok = await user.comparePassword(currentPassword);
+      if (!ok) return res.status(401).json({ error: 'Invalid current password' });
+    }
+
+    user.password = newPassword;
+    user.must_change_password = false;
+    await user.save();
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 };
 
@@ -147,5 +176,6 @@ const getMe = async (req, res) => {
 module.exports = {
   register,
   login,
-  getMe
+  getMe,
+  changePassword
 };

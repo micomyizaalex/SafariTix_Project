@@ -13,12 +13,21 @@ const Bus = sequelize.define(
     company_id: {
       type: DataTypes.UUID,
       allowNull: false,
+      references: {
+        model: 'companies',
+        key: 'id'
+      }
     },
 
     driver_id: {
       type: DataTypes.UUID,
       allowNull: true,
       comment: "Foreign key to Driver - each bus is assigned to a single driver"
+      ,
+      references: {
+        model: 'users',
+        key: 'id'
+      }
     },
 
     plate_number: {

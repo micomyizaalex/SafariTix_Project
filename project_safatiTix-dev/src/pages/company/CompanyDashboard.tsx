@@ -150,10 +150,10 @@ export default function CompanyDashboard() {
     async function fetchKpis() {
       try {
         const [busesRes, driversRes, schedulesRes, ticketsRes] = await Promise.all([
-          fetch('/api/companies/buses', { headers }),
-          fetch('/api/companies/drivers', { headers }),
-          fetch('/api/companies/schedules', { headers }),
-          fetch('/api/companies/tickets', { headers })
+          fetch('/api/company/buses', { headers }),
+            fetch('/api/company/drivers', { headers }),
+            fetch('/api/company/schedules', { headers }),
+            fetch('/api/company/tickets', { headers })
         ]);
 
         const busesJson = busesRes.ok ? await busesRes.json() : { buses: [] };
@@ -618,10 +618,130 @@ function BusesSection() {
 }
 
 function DriversSection() {
+  const [drivers, setDrivers] = React.useState<any[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [selected, setSelected] = React.useState<any>(null);
+  const [showAddDriver, setShowAddDriver] = React.useState(false);
+  const [selectedIds, setSelectedIds] = React.useState<Record<string, boolean>>({});
+  const [selectAll, setSelectAll] = React.useState(false);
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+
+  React.useEffect(() => {
+    let mounted = true;
+    const headers = token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+    async function load() {
+      try {
+        const res = await fetch('/api/company/drivers', { headers });
+        if (!mounted) return;
+        if (res.ok) {
+          const json = await res.json();
+          setDrivers(json.drivers || []);
+        } else {
+          setDrivers([]);
+        }
+      } catch (e) {
+        setDrivers([]);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+    load();
+    return () => { mounted = false; };
+  }, []);
+
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm">
-      <h2 className="text-2xl font-['Montserrat'] font-bold text-[#2B2D42] mb-4">Drivers Management</h2>
-      <p className="text-gray-600">Driver management interface coming soon...</p>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-['Montserrat'] font-bold text-[#2B2D42]">Drivers Management</h2>
+        <button onClick={() => setShowAddDriver(true)} className="px-3 py-2 bg-[#0077B6] text-white rounded-md">Add Driver</button>
+      </div>
+
+      {loading ? (
+        <div className="text-sm text-gray-500">Loading drivers...</div>
+      ) : drivers.length === 0 ? (
+        <div className="text-sm text-gray-500">No drivers found for this company.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full table-auto border-collapse">
+            <thead>
+              <tr className="text-left">
+                <th className="px-3 py-2 border-b"><input type="checkbox" checked={selectAll} onChange={(e) => {
+                  const next = e.target.checked;
+                  setSelectAll(next);
+                  if (next) {
+                    const map: Record<string, boolean> = {};
+                    drivers.forEach(d => { map[String(d.id)] = true; });
+                    setSelectedIds(map);
+                  } else {
+                    setSelectedIds({});
+                  }
+                }} /></th>
+                <th className="px-3 py-2 border-b">ID</th>
+                <th className="px-3 py-2 border-b">Name</th>
+                <th className="px-3 py-2 border-b">Email</th>
+                <th className="px-3 py-2 border-b">Phone</th>
+                <th className="px-3 py-2 border-b">License</th>
+                <th className="px-3 py-2 border-b">Available</th>
+                <th className="px-3 py-2 border-b">Assigned Buses</th>
+                <th className="px-3 py-2 border-b">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {drivers.map((d) => (
+                <tr key={d.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 border-b">
+                    <input type="checkbox" checked={!!selectedIds[String(d.id)]} onChange={(e) => {
+                      const next = { ...selectedIds, [String(d.id)]: e.target.checked };
+                      setSelectedIds(next);
+                      if (!e.target.checked) setSelectAll(false);
+                    }} />
+                  </td>
+                  <td className="px-3 py-2 border-b">{d.id}</td>
+                  <td className="px-3 py-2 border-b">{d.name}</td>
+                  <td className="px-3 py-2 border-b">{d.email || '—'}</td>
+                  <td className="px-3 py-2 border-b">{d.phone || '—'}</td>
+                  <td className="px-3 py-2 border-b">{d.license || '—'}</td>
+                  <td className="px-3 py-2 border-b">{d.available ? 'Yes' : 'No'}</td>
+                  <td className="px-3 py-2 border-b">{(d.buses || []).length}</td>
+                  <td className="px-3 py-2 border-b"><button onClick={() => setSelected(d)} className="px-2 py-1 bg-gray-100 rounded">View</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {selected && <DriverModal driver={selected} onClose={() => setSelected(null)} />}
+      {showAddDriver && <AddDriverModal onClose={() => { setShowAddDriver(false); window.location.reload(); }} token={token} />}
+    </div>
+  );
+}
+
+function DriverModal({ driver, onClose }: { driver: any; onClose: () => void }) {
+  const [details, setDetails] = React.useState<any>(driver);
+  React.useEffect(() => { setDetails(driver); }, [driver]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
+      <div className="relative bg-white rounded-2xl p-6 w-[520px] shadow-lg">
+        <div className="flex items-start justify-between mb-4">
+          <h3 className="text-lg font-semibold">Driver Details</h3>
+          <button onClick={onClose} className="text-gray-500">Close</button>
+        </div>
+        <div className="space-y-3">
+          <div><span className="font-semibold">Name:</span> {details.name}</div>
+          <div><span className="font-semibold">License:</span> {details.license || 'N/A'}</div>
+          <div><span className="font-semibold">Phone:</span> {details.phone || 'N/A'}</div>
+          <div><span className="font-semibold">Status:</span> {details.available ? 'Available' : 'Unavailable'}</div>
+          <div>
+            <span className="font-semibold">Assigned buses:</span>
+            <ul className="list-disc ml-6">
+              {(details.buses || []).map((b: any) => (<li key={b.id}>{b.plate_number || b.plateNumber || b.id}</li>))}
+            </ul>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -667,6 +787,83 @@ function SettingsSection() {
     <div className="bg-white rounded-2xl p-6 shadow-sm">
       <h2 className="text-2xl font-['Montserrat'] font-bold text-[#2B2D42] mb-4">Settings</h2>
       <p className="text-gray-600">Settings interface coming soon...</p>
+    </div>
+  );
+}
+
+function AddDriverModal({ onClose, token }: { onClose: () => void; token: string | null }) {
+  const [fullName, setFullName] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [phone, setPhone] = React.useState('');
+  const [license, setLicense] = React.useState('');
+  const [error, setError] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  const submit = async (e: any) => {
+    e.preventDefault();
+    setError('');
+    if (!fullName || !license) { setError('Name and license number are required'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/company/drivers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ name: fullName, email, phone, license })
+      });
+      const contentType = (res.headers && res.headers.get ? res.headers.get('content-type') || '' : '');
+      if (!res.ok) {
+        // Try to read text for better error message (handles HTML error pages)
+        const text = await res.text().catch(() => null);
+        throw new Error((text && text.slice ? text.slice(0, 1000) : `Request failed with status ${res.status}`) || 'Failed to create driver');
+      }
+
+      if (!contentType.includes('application/json')) {
+        const text = await res.text().catch(() => null);
+        throw new Error((text && text.slice ? `Unexpected non-JSON response: ${text.slice(0,200)}` : 'Unexpected non-JSON response from server'));
+      }
+
+      const j = await res.json();
+      if (!j || j.error) throw new Error(j?.error || 'Failed to create driver');
+      onClose();
+    } catch (err: any) {
+      setError(err.message || 'Error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
+      <div className="relative bg-white rounded-2xl p-6 w-[520px] shadow-lg">
+        <div className="flex items-start justify-between mb-4">
+          <h3 className="text-lg font-semibold">Add Driver</h3>
+          <button onClick={onClose} className="text-gray-500">Close</button>
+        </div>
+        {error && <div className="text-red-600 mb-2">{error}</div>}
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className="block text-sm mb-1">Full name</label>
+            <input value={fullName} onChange={e => setFullName(e.target.value)} type="text" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Email</label>
+            <input value={email} onChange={e => setEmail(e.target.value)} type="email" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Phone number</label>
+            <input value={phone} onChange={e => setPhone(e.target.value)} type="text" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">License number</label>
+            <input value={license} onChange={e => setLicense(e.target.value)} type="text" className="w-full border rounded px-3 py-2" />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 rounded">Cancel</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 bg-[#0077B6] text-white rounded">{saving ? 'Saving...' : 'Create Driver'}</button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

@@ -46,6 +46,16 @@ const User = sequelize.define('User', {
   company_id: {
     type: DataTypes.UUID,
     allowNull: true,
+    references: {
+      model: 'companies',
+      key: 'id'
+    }
+  },
+
+  must_change_password: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    allowNull: false
   },
   
   is_active: {
@@ -79,6 +89,13 @@ const User = sequelize.define('User', {
   tableName: 'users',
   timestamps: true,
   underscored: true,
+  validate: {
+    driverRequiresCompany() {
+      if (this.role === 'driver' && !this.company_id) {
+        throw new Error('Driver users must have a company_id');
+      }
+    }
+  },
   hooks: {
     beforeCreate: async (user) => {
       if (user.password) {

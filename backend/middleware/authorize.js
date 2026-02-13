@@ -16,6 +16,32 @@ const requireRoles = (roles = []) => (req, res, next) => {
   next();
 };
 
+// Ensure current user is associated with a company and attach companyId to request
+const requireCompany = async (req, res, next) => {
+  try {
+    const { User } = require('../models');
+    const user = await User.findByPk(req.userId);
+    if (!user) return res.status(403).json({ error: 'User not found' });
+    if (!user.company_id) return res.status(403).json({ error: 'No company associated with user' });
+    req.companyId = user.company_id;
+    next();
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+// Ensure driver has changed temporary password before accessing driver-only routes
+const ensurePasswordChanged = (req, res, next) => {
+  try {
+    if (req.userRole === 'driver' && req.mustChangePassword) {
+      return res.status(403).json({ error: 'PASSWORD_CHANGE_REQUIRED', message: 'Please change your temporary password' });
+    }
+    next();
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+};
+
 // Check if user owns resource (post)
 const isPostOwner = async (req, res, next) => {
   try {
@@ -68,4 +94,6 @@ module.exports = {
   isCommentOwner,
   isProfileOwner,
   requireRoles
+  ,requireCompany
+  ,ensurePasswordChanged
 };

@@ -1,4 +1,4 @@
-const { Bus, Driver, sequelize, DriverAssignment, Schedule } = require('../models');
+const { Bus, Driver, User, sequelize, DriverAssignment, Schedule } = require('../models');
 const { Op } = require('sequelize');
 
 const VALID_LAYOUTS = ['25','30','50'];
@@ -34,8 +34,15 @@ const createBus = async (companyId, payload, options = {}) => {
     // If driver provided, validate and auto-unassign any other active bus
     if (driver_id) {
       console.log('Validating driver assignment for driver_id:', driver_id);
-      const driver = await Driver.findByPk(driver_id, { transaction: t });
-      if (!driver || driver.company_id !== companyId) throw new Error('Driver not found for this company');
+      // Prefer the canonical User.driver model (users table). Fall back to legacy Driver table.
+      let driver = await User.findByPk(driver_id, { transaction: t });
+      if (driver) {
+        if (driver.role !== 'driver' || driver.company_id !== companyId) throw new Error('Driver not found for this company');
+      } else {
+        // Legacy Driver table (kept for backwards compatibility)
+        driver = await Driver.findByPk(driver_id, { transaction: t });
+        if (!driver || driver.company_id !== companyId) throw new Error('Driver not found for this company');
+      }
 
       // Find any other active bus assigned to this driver
       const other = await Bus.findOne({ where: { driver_id, status: 'ACTIVE' }, transaction: t });
@@ -115,8 +122,14 @@ const updateBus = async (companyId, id, payload, options = {}) => {
         // mark any active driver assignment as unassigned
         await DriverAssignment.update({ unassigned_at: new Date() }, { where: { bus_id: id, unassigned_at: null }, transaction: t });
       } else {
-        const driver = await Driver.findByPk(payload.driver_id, { transaction: t });
-        if (!driver || driver.company_id !== companyId) throw new Error('Driver not found for this company');
+        // Prefer canonical User record for driver validation
+        let driver = await User.findByPk(payload.driver_id, { transaction: t });
+        if (driver) {
+          if (driver.role !== 'driver' || driver.company_id !== companyId) throw new Error('Driver not found for this company');
+        } else {
+          driver = await Driver.findByPk(payload.driver_id, { transaction: t });
+          if (!driver || driver.company_id !== companyId) throw new Error('Driver not found for this company');
+        }
 
         // Prevent assigning driver to multiple active buses; if found, auto-unassign it
         const other = await Bus.findOne({ where: { driver_id: payload.driver_id, status: 'ACTIVE', id: { [Op.ne]: id } }, transaction: t });

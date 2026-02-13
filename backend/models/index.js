@@ -17,6 +17,7 @@ const ScheduleJournal = require('./ScheduleJournal');
 const Seat = require('./Seat');
 const SeatLock = require('./SeatLock');
 const LiveBusLocation = require('./LiveBusLocation');
+const DriverLocation = require('./DriverLocation');
 
 // ============================================
 // RELATIONSHIPS / ASSOCIATIONS
@@ -46,7 +47,7 @@ Company.hasMany(User, { foreignKey: "company_id", as: "employees" });
 
 // Bus relationships
 Bus.belongsTo(Company, { foreignKey: "company_id" });
-Bus.belongsTo(Driver, { foreignKey: "driver_id", as: "driver" });
+Bus.belongsTo(User, { foreignKey: "driver_id", as: "driver" });
 Bus.hasMany(DriverAssignment, { foreignKey: "bus_id" });
 Bus.hasMany(Journal, { foreignKey: "bus_id" });
 Bus.hasOne(LiveBusLocation, { foreignKey: "bus_id", as: "liveLocation" });
@@ -76,7 +77,7 @@ Route.hasMany(Schedule, { foreignKey: "route_id" });
 // Schedule relationships
 Schedule.belongsTo(Bus, { foreignKey: "bus_id" });
 Schedule.belongsTo(Route, { foreignKey: "route_id" });
-Schedule.belongsTo(Driver, { foreignKey: "driver_id" });
+Schedule.belongsTo(User, { foreignKey: "driver_id", as: 'driver' });
 Schedule.belongsTo(Company, { foreignKey: "company_id" });
 Schedule.belongsTo(User, { foreignKey: "created_by" });
 Schedule.hasMany(Journal, { foreignKey: "schedule_id" });
@@ -99,18 +100,22 @@ Ticket.belongsTo(SeatLock, { foreignKey: 'lock_id', as: 'lock' });
 
 // Journal relationships
 Journal.belongsTo(Bus, { foreignKey: "bus_id" });
-Journal.belongsTo(Driver, { foreignKey: "driver_id" });
+Journal.belongsTo(User, { foreignKey: "driver_id", as: 'driver' });
 Journal.belongsTo(Schedule, { foreignKey: "schedule_id" });
 Journal.belongsTo(Company, { foreignKey: "company_id" });
 
 // Location relationships
 Location.belongsTo(Bus, { foreignKey: "bus_id" });
-Location.belongsTo(Driver, { foreignKey: "driver_id" });
+Location.belongsTo(User, { foreignKey: "driver_id", as: 'driver' });
 Location.belongsTo(Schedule, { foreignKey: "schedule_id" });
 
 // LiveBusLocation relationships
 LiveBusLocation.belongsTo(Bus, { foreignKey: "bus_id", as: "bus" });
-LiveBusLocation.belongsTo(Driver, { foreignKey: "driver_id", as: "driver" });
+LiveBusLocation.belongsTo(User, { foreignKey: "driver_id", as: "driver" });
+
+// DriverLocation relationships (latest GPS for a driver)
+DriverLocation.belongsTo(User, { foreignKey: 'driver_id', as: 'driver' });
+User.hasOne(DriverLocation, { foreignKey: 'driver_id', as: 'driverLocation' });
 
 // Notification relationships
 Notification.belongsTo(User, { foreignKey: "user_id", as: "user" });
@@ -133,4 +138,5 @@ module.exports = {
   SeatLock,
   ScheduleJournal,
   LiveBusLocation
+  ,DriverLocation
 }

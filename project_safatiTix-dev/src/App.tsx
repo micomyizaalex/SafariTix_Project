@@ -31,6 +31,7 @@ import Revenue from './pages/Revenue';
 import SubscriptionPage from './pages/SubscriptionPage';
 import ReportsPage from './pages/ReportsPage';
 import DriverTracking from './pages/company/DriverTracking';
+import FirstLoginChange from './pages/FirstLoginChange';
 
 const App = () => {
   return (
@@ -70,6 +71,8 @@ const App = () => {
 
               <Route path='*' element={<NotFound />} />
             </Route>
+
+            <Route path='/first-login-change' element={<FirstLoginChange/>} />
 
             {/* Alias dashboard routes */}
             <Route path='/driver/dashboard' element={<Layout />}>

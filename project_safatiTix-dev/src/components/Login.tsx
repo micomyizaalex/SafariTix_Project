@@ -50,6 +50,14 @@ export function Login() {
 
       setSuccessMessage('Login successful!');
 
+      // If server indicates password change required, redirect to first-login change
+      if (data.must_change_password) {
+        // persist token and user for change page
+        await signIn(data.token, data.user);
+        navigate('/first-login-change', { replace: true });
+        return;
+      }
+
       // Use AuthProvider to persist and set the authenticated user, then navigate
       await signIn(data.token, data.user);
       const redirect = data?.homePath || data?.user?.homePath || getHomePath(data.user);
