@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Home, Bus, Calendar, Users, MapPin, Bell, User, LogOut, Menu, X,
   Clock, DollarSign, CheckCircle, Navigation, Scan, QrCode, ChevronRight,
   Search, TrendingUp, AlertCircle, Package, Phone, Mail, Settings,
   ArrowRight, Star, Award, Activity,
 } from 'lucide-react';
+import { BrowserQRCodeReader } from '@zxing/browser';
 
 // ==================== SAMPLE DATA ====================
 const driverData = {
@@ -433,7 +434,7 @@ function DashboardView({ setShowScanner, driverName, schedules, user, activeTrip
             {recentPassengers.slice(0, 5).map(passenger => (
               <div key={passenger.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 transition-colors">
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#0077B6] to-[#00A8E8] flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                  {passenger.name.split(' ').map(n => n[0]).join('')}
+                  {passenger.name.split(' ').map((n: string) => n[0]).join('')}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold text-sm text-slate-900 truncate">{passenger.name}</div>
@@ -454,7 +455,7 @@ function DashboardView({ setShowScanner, driverName, schedules, user, activeTrip
 }
 
 // ==================== STAT CARD ====================
-function StatCard({ icon: Icon, label, value, color }) {
+function StatCard({ icon: Icon, label, value, color }: { icon: any, label: string, value: any, color: string }) {
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-lg transition-all group">
       <div className="flex items-center gap-3 mb-3">
@@ -582,7 +583,7 @@ function TripsView({ trips, loading, error }: { trips?: any[], loading?: boolean
 }
 
 // ==================== PASSENGERS VIEW ====================
-function PassengersView({ setShowScanner }) {
+function PassengersView({ setShowScanner }: { setShowScanner: (show: boolean) => void }) {
   const [search, setSearch] = useState('');
 
   return (
@@ -735,23 +736,133 @@ function ProfileView() {
 }
 
 // ==================== SCANNER MODAL ====================
-function ScannerModal({ onClose }) {
+function ScannerModal({ onClose }: { onClose: () => void }) {
+  const { accessToken } = useAuth();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const readerRef = useRef<BrowserQRCodeReader | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [scanning, setScanning] = useState(false);
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
 
-  const handleScan = () => {
+  useEffect(() => {
+    // Initialize QR code reader
+    readerRef.current = new BrowserQRCodeReader();
+    
+    return () => {
+      // Cleanup: stop scanning and release camera
+      stopScanning();
+    };
+  }, []);
+
+  const startScanning = async () => {
     setScanning(true);
+    setError(null);
     setResult(null);
-    setTimeout(() => {
+
+    try {
+      const videoInputDevices = await BrowserQRCodeReader.listVideoInputDevices();
+      
+      if (videoInputDevices.length === 0) {
+        setError('No camera found on this device');
+        setScanning(false);
+        return;
+      }
+
+      // Use the first camera (or back camera if available)
+      const selectedDeviceId = videoInputDevices[0]?.deviceId;
+
+      if (readerRef.current && videoRef.current) {
+        const controls = await readerRef.current.decodeFromVideoDevice(
+          selectedDeviceId,
+          videoRef.current,
+          async (qrResult, err) => {
+            if (qrResult) {
+              // QR code detected, process it
+              await handleScan(qrResult.getText());
+            }
+            if (err && !(err instanceof Error && err.message.includes('NotFoundException'))) {
+              console.error('QR scanning error:', err);
+            }
+          }
+        );
+        // Store the video stream for cleanup
+        if (videoRef.current.srcObject instanceof MediaStream) {
+          streamRef.current = videoRef.current.srcObject;
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to start scanner:', err);
+      setError(err.message || 'Failed to access camera');
       setScanning(false);
-      setResult({ success: true, passenger: recentPassengers[2] });
-    }, 2000);
+    }
+  };
+
+  const stopScanning = () => {
+    // Stop video stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    // Clear video element
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setScanning(false);
+  };
+
+  const handleScan = async (qrCode: string) => {
+    if (processing) return; // Prevent multiple simultaneous scans
+    
+    setProcessing(true);
+    stopScanning();
+
+    try {
+      const response = await fetch('/api/driver/scan', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ qrCode }),
+      });
+
+      const data = await response.json();
+
+      if (data.valid) {
+        // Success - ticket checked in
+        setResult({
+          success: true,
+          message: data.message || 'Ticket validated successfully',
+          ticket: data.ticket,
+        });
+      } else {
+        // Invalid ticket (already used, cancelled, etc.)
+        setResult({
+          success: false,
+          message: data.message || 'Invalid ticket',
+          ticket: data.ticket,
+        });
+      }
+    } catch (err: any) {
+      console.error('Failed to scan ticket:', err);
+      setError(err.message || 'Failed to validate ticket');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleScanAnother = () => {
+    setResult(null);
+    setError(null);
+    startScanning();
   };
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl max-w-md w-full p-8 relative shadow-2xl">
-        <button onClick={onClose} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-all">
+      <div className="bg-white rounded-3xl max-w-lg w-full p-8 relative shadow-2xl">
+        <button onClick={() => { stopScanning(); onClose(); }} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-all">
           <X className="w-5 h-5 text-slate-700" />
         </button>
 
@@ -760,48 +871,98 @@ function ScannerModal({ onClose }) {
             <Scan className="w-10 h-10 text-white" />
           </div>
           <h3 className="text-2xl font-black text-slate-900 mb-2">
-            {scanning ? 'Scanning...' : result ? 'Verified!' : 'Scan QR Code'}
+            {scanning ? 'Scanning...' : result ? (result.success ? 'Verified!' : 'Invalid Ticket') : 'Scan QR Code'}
           </h3>
           <p className="text-slate-600 text-sm">
-            {scanning ? 'Hold the code steady' : result ? 'Ticket is valid' : 'Position QR code in frame'}
+            {scanning ? 'Hold the QR code steady in frame' : 
+             result ? result.message : 
+             'Click "Start Scanning" to begin'}
           </p>
         </div>
 
-        <div className={`rounded-2xl p-8 mb-6 border-4 ${
-          scanning ? 'bg-blue-50 border-blue-300 animate-pulse' :
-          result ? 'bg-green-50 border-green-300' :
-          'bg-slate-50 border-slate-300 border-dashed'
+        {/* Video Preview or Result */}
+        <div className={`rounded-2xl mb-6 border-4 overflow-hidden ${
+          scanning ? 'bg-black border-blue-300' :
+          result?.success ? 'bg-green-50 border-green-300 p-8' :
+          result?.success === false ? 'bg-red-50 border-red-300 p-8' :
+          error ? 'bg-red-50 border-red-300 p-8' :
+          'bg-slate-50 border-slate-300 border-dashed p-8'
         }`}>
-          <div className="w-48 h-48 mx-auto flex items-center justify-center">
-            {scanning ? (
-              <div className="relative">
-                <div className="w-32 h-32 border-4 border-[#0077B6] border-t-transparent rounded-full animate-spin"></div>
-                <QrCode className="w-16 h-16 text-[#0077B6] absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+          {scanning ? (
+            <div className="relative">
+              <video 
+                ref={videoRef} 
+                className="w-full h-64 object-cover rounded-lg"
+                autoPlay
+                playsInline
+                muted
+              />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-48 h-48 border-4 border-white/50 rounded-lg"></div>
               </div>
-            ) : result ? (
-              <div className="text-center">
-                <CheckCircle className="w-24 h-24 text-green-600 mx-auto mb-3" />
-                <div className="font-bold text-slate-900">{result.passenger.name}</div>
-                <div className="text-sm text-slate-600">Seat {result.passenger.seat}</div>
-              </div>
-            ) : (
+            </div>
+          ) : result ? (
+            <div className="text-center">
+              {result.success ? (
+                <>
+                  <CheckCircle className="w-24 h-24 text-green-600 mx-auto mb-4" />
+                  <div className="font-bold text-xl text-slate-900 mb-2">
+                    {result.ticket?.commuter?.name || 'Passenger'}
+                  </div>
+                  <div className="text-sm text-slate-600 mb-1">
+                    Seat {result.ticket?.seatNumber || 'N/A'}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {result.ticket?.bookingRef || ''}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="w-24 h-24 text-red-600 mx-auto mb-4" />
+                  <div className="font-bold text-xl text-slate-900 mb-2">
+                    {result.message}
+                  </div>
+                  {result.ticket && (
+                    <div className="text-sm text-slate-600">
+                      {result.ticket.commuter?.name} • Seat {result.ticket.seatNumber}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ) : error ? (
+            <div className="text-center">
+              <AlertCircle className="w-16 h-16 text-red-600 mx-auto mb-3" />
+              <div className="font-bold text-slate-900 mb-1">Error</div>
+              <div className="text-sm text-slate-600">{error}</div>
+            </div>
+          ) : (
+            <div className="h-64 flex items-center justify-center">
               <QrCode className="w-20 h-20 text-slate-400" />
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
+        {/* Action Buttons */}
         {result ? (
           <div className="space-y-3">
-            <button onClick={onClose} className="w-full bg-gradient-to-r from-[#27AE60] to-[#229954] text-white py-4 rounded-xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2">
-              <CheckCircle className="w-5 h-5" />
-              Confirm Check-In
-            </button>
-            <button onClick={handleScan} className="w-full bg-slate-100 text-slate-900 py-3 rounded-xl font-bold hover:bg-slate-200 transition-all">
-              Scan Another
+            {result.success && (
+              <button onClick={() => { stopScanning(); onClose(); }} className="w-full bg-gradient-to-r from-[#27AE60] to-[#229954] text-white py-4 rounded-xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2">
+                <CheckCircle className="w-5 h-5" />
+                Done
+              </button>
+            )}
+            <button onClick={handleScanAnother} className="w-full bg-slate-100 text-slate-900 py-3 rounded-xl font-bold hover:bg-slate-200 transition-all">
+              Scan Another Ticket
             </button>
           </div>
+        ) : scanning ? (
+          <button onClick={stopScanning} className="w-full bg-red-500 text-white py-4 rounded-xl font-bold hover:bg-red-600 transition-all flex items-center justify-center gap-2">
+            <X className="w-5 h-5" />
+            Stop Scanning
+          </button>
         ) : (
-          <button onClick={handleScan} className="w-full bg-gradient-to-r from-[#0077B6] to-[#00A8E8] text-white py-4 rounded-xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2">
+          <button onClick={startScanning} disabled={processing} className="w-full bg-gradient-to-r from-[#0077B6] to-[#00A8E8] text-white py-4 rounded-xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50">
             <Scan className="w-5 h-5" />
             Start Scanning
           </button>

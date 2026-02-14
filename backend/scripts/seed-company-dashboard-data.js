@@ -6,7 +6,7 @@ async function seedCompanyDashboardData() {
     console.log('🌱 Seeding dashboard data for company...\n');
 
     // Target specific company ID - replace with your company ID
-    const targetCompanyId = 'fc120772-6d65-4055-ad4f-14853ac7d486';
+    const targetCompanyId = 'c3adadb9-5d49-45e9-8e40-fe8903a5e253';
     
     const company = await Company.findByPk(targetCompanyId);
 
@@ -126,7 +126,9 @@ async function seedCompanyDashboardData() {
           departure_time: departureTime,
           arrival_time: arrivalTime,
           price_per_seat: price,
+          total_seats: bus.capacity,
           available_seats: bus.capacity - ticketsToCreate,
+          booked_seats: ticketsToCreate,
           status: 'scheduled',
           ticket_status: 'OPEN',
           created_by: company.owner_id

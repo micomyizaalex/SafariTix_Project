@@ -32,6 +32,7 @@ import SubscriptionPage from './pages/SubscriptionPage';
 import ReportsPage from './pages/ReportsPage';
 import DriverTracking from './pages/company/DriverTracking';
 import FirstLoginChange from './pages/FirstLoginChange';
+import AccountSettings from './pages/account/AccountSettings';
 
 const App = () => {
   return (
@@ -64,6 +65,9 @@ const App = () => {
               <Route path='commuter' element={<RequireRole allowed={["commuter"]}><CommuterLayout/></RequireRole>}>
                 <Route index element={<CommuterDashboard/>} />
               </Route>
+
+              {/* Account settings page */}
+              <Route path='account' element={<RequireRole allowed={["commuter"]}><AccountSettings/></RequireRole>} />
 
               <Route path='driver' element={<RequireRole allowed={["driver"]}><DriverLayout/></RequireRole>}>
                 <Route index element={<DriverDashboard/>} />

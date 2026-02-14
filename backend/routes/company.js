@@ -19,6 +19,8 @@ router.delete('/schedules/:id', auth, requireRoles(['company_admin','admin']), r
 router.patch('/schedules/:id/reopen', auth, requireRoles(['company_admin','admin']), requireCompany, controller.reopenScheduleTickets);
 router.get('/schedules/:id/journals', auth, requireRoles(['company_admin','admin']), requireCompany, controller.getScheduleJournals);
 router.get('/tickets', auth, requireRoles(['company_admin','admin']), requireCompany, controller.getTickets);
+router.patch('/tickets/:id', auth, requireRoles(['company_admin','admin']), requireCompany, controller.updateTicket);
+router.get('/revenue', auth, requireRoles(['company_admin','admin']), requireCompany, controller.getRevenue);
 router.get('/drivers', auth, requireRoles(['company_admin','admin']), requireCompany, controller.getDrivers);
 router.get('/drivers/:id', auth, requireRoles(['company_admin','admin']), requireCompany, controller.getDriver);
 router.post('/drivers', auth, requireRoles(['company_admin','admin']), requireCompany, controller.createDriver);

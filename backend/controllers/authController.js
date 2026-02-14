@@ -91,10 +91,19 @@ const register = async (req, res) => {
     const token = generateAccessToken(user.id, user.role);
 
     const safeUser = user.toSafeObject();
+    const userPayload = {
+      id: safeUser.id,
+      name: safeUser.full_name || safeUser.name || '',
+      email: safeUser.email,
+      phone: safeUser.phone_number || safeUser.phone || null,
+      role: safeUser.role,
+      avatar_url: safeUser.avatar_url || null,
+      companyId: safeUser.company_id || null,
+    };
     res.status(201).json({
-      user: { ...safeUser, homePath: roleHomePath(safeUser.role) },
+      user: { ...userPayload, homePath: roleHomePath(userPayload.role) },
       token,
-      homePath: roleHomePath(safeUser.role)
+      homePath: roleHomePath(userPayload.role)
     });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -122,11 +131,20 @@ const login = async (req, res) => {
     const token = generateAccessToken(user.id, user.role);
 
     const safeUser = user.toSafeObject();
+    const userPayload = {
+      id: safeUser.id,
+      name: safeUser.full_name || safeUser.name || '',
+      email: safeUser.email,
+      phone: safeUser.phone_number || safeUser.phone || null,
+      role: safeUser.role,
+      avatar_url: safeUser.avatar_url || null,
+      companyId: safeUser.company_id || null,
+    };
 
     res.json({
-      user: { ...safeUser, homePath: roleHomePath(safeUser.role) },
+      user: { ...userPayload, homePath: roleHomePath(userPayload.role) },
       token,
-      homePath: roleHomePath(safeUser.role),
+      homePath: roleHomePath(userPayload.role),
       must_change_password: !!user.must_change_password
     });
   } catch (error) {
@@ -162,11 +180,53 @@ const changePassword = async (req, res) => {
   }
 };
 
+const updateProfile = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { full_name, email, phone_number, avatar_url, preferences } = req.body;
+    const user = await User.findByPk(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // update allowed fields
+    if (typeof full_name !== 'undefined') user.full_name = full_name;
+    if (typeof email !== 'undefined') user.email = email;
+    if (typeof phone_number !== 'undefined') user.phone_number = phone_number;
+    if (typeof avatar_url !== 'undefined') user.avatar_url = avatar_url;
+    if (typeof preferences !== 'undefined') user.preferences = preferences;
+
+    await user.save();
+
+    const safeUser = user.toSafeObject();
+    const userPayload = {
+      id: safeUser.id,
+      name: safeUser.full_name || safeUser.name || '',
+      email: safeUser.email,
+      phone: safeUser.phone_number || safeUser.phone || null,
+      role: safeUser.role,
+      avatar_url: safeUser.avatar_url || null,
+      companyId: safeUser.company_id || null,
+    };
+
+    res.json({ user: { ...userPayload, homePath: roleHomePath(userPayload.role) } });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
 const getMe = async (req, res) => {
   try {
     const user = await User.findByPk(req.userId);
     const safeUser = user.toSafeObject();
-    res.json({ user: { ...safeUser, homePath: roleHomePath(safeUser.role) }, homePath: roleHomePath(safeUser.role) });
+    const userPayload = {
+      id: safeUser.id,
+      name: safeUser.full_name || safeUser.name || '',
+      email: safeUser.email,
+      phone: safeUser.phone_number || safeUser.phone || null,
+      role: safeUser.role,
+      avatar_url: safeUser.avatar_url || null,
+      companyId: safeUser.company_id || null,
+    };
+    res.json({ user: { ...userPayload, homePath: roleHomePath(userPayload.role) }, homePath: roleHomePath(userPayload.role) });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -178,5 +238,6 @@ module.exports = {
   register,
   login,
   getMe,
-  changePassword
+  changePassword,
+  updateProfile
 };

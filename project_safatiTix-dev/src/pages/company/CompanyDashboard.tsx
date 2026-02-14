@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useAuth } from '../../components/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import SuccessPopup from '../../components/SuccessPopup';
+import RevenueReports from './RevenueReports';
+import TicketsManagement from './TicketsManagement';
 import {
   LayoutDashboard,
   Bus,
@@ -65,38 +67,12 @@ const COLORS = {
   white: '#FFFFFF',
 };
 
-// Sample Data
-const revenueData = [
-  { month: 'Jan', revenue: 450000, tickets: 1200, occupancy: 85 },
-  { month: 'Feb', revenue: 520000, tickets: 1450, occupancy: 92 },
-  { month: 'Mar', revenue: 480000, tickets: 1350, occupancy: 88 },
-  { month: 'Apr', revenue: 610000, tickets: 1600, occupancy: 95 },
-  { month: 'May', revenue: 580000, tickets: 1520, occupancy: 91 },
-  { month: 'Jun', revenue: 720000, tickets: 1850, occupancy: 97 },
-];
-
 const routePerformance = [
   { route: 'Kigali → Gisenyi', trips: 45, revenue: 1250000, occupancy: 92 },
   { route: 'Kigali → Butare', trips: 38, revenue: 980000, occupancy: 88 },
   { route: 'Kigali → Musanze', trips: 32, revenue: 720000, occupancy: 85 },
   { route: 'Butare → Huye', trips: 28, revenue: 520000, occupancy: 78 },
 ];
-
-const busStatusData = [
-  { name: 'Active', value: 24, color: COLORS.success },
-  { name: 'In Maintenance', value: 3, color: COLORS.secondary },
-  { name: 'Inactive', value: 2, color: COLORS.danger },
-];
-
-const recentTickets = [
-  { id: 'TKT-1245', passenger: 'John Kamau', route: 'Kigali → Gisenyi', date: '2024-02-12', amount: 7500, status: 'confirmed' },
-  { id: 'TKT-1244', passenger: 'Mary Uwase', route: 'Kigali → Butare', date: '2024-02-12', amount: 3500, status: 'confirmed' },
-  { id: 'TKT-1243', passenger: 'Peter Mugabe', route: 'Kigali → Musanze', date: '2024-02-12', amount: 4500, status: 'cancelled' },
-  { id: 'TKT-1242', passenger: 'Alice Nzabonimana', route: 'Butare → Huye', date: '2024-02-11', amount: 2800, status: 'confirmed' },
-];
-
-// Active buses will be loaded from backend and computed from schedules
-// state: array of { id, plateNumber, driverName, route, occupancy, eta }
 
 const notifications = [
   { id: 1, type: 'alert', message: 'Bus RAB-202B scheduled for maintenance today', time: '10 min ago' },
@@ -146,6 +122,13 @@ export default function CompanyDashboard() {
   });
 
   const [activeBusesList, setActiveBusesList] = React.useState<any[]>([]);
+  const [busStatusData, setBusStatusData] = React.useState([
+    { name: 'Active', value: 0, color: COLORS.success },
+    { name: 'In Maintenance', value: 0, color: COLORS.secondary },
+    { name: 'Inactive', value: 0, color: COLORS.danger },
+  ]);
+  const [recentTickets, setRecentTickets] = React.useState<any[]>([]);
+  const [revenueData, setRevenueData] = React.useState<any[]>([]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -267,24 +250,101 @@ export default function CompanyDashboard() {
 
         const activeDrivers = drivers.length;
 
-        // Today's revenue and tickets (local date)
+        // Today's revenue and tickets from schedules (sold seats × price)
         const today = new Date();
-        today.setHours(0,0,0,0);
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
+        const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD format
 
         let todaysRevenue = 0;
         let todaysTickets = 0;
-        tickets.forEach(t => {
-          const dt = t.bookedAt ? new Date(t.bookedAt) : (t.bookedAt || t.booked_at ? new Date(t.booked_at) : null);
-          if (!dt) return;
-          if (dt >= today && dt < tomorrow) {
-            todaysRevenue += parseFloat(t.price || 0);
-            todaysTickets += 1;
+        schedules.forEach(s => {
+          // Check if schedule is for today
+          const scheduleDate = s.scheduleDate || s.date || s.schedule_date;
+          if (scheduleDate && scheduleDate.startsWith(todayStr)) {
+            const totalSeats = s.totalSeats || s.total_seats || 0;
+            const availableSeats = (s.seatsAvailable != null ? s.seatsAvailable : s.seats_available) || 0;
+            const soldSeats = totalSeats - availableSeats;
+            const price = s.price || 0;
+            const scheduleRevenue = soldSeats * price;
+            
+            todaysRevenue += scheduleRevenue;
+            todaysTickets += soldSeats;
           }
         });
 
         setKpis({ totalBuses, activeBuses, activeRoutes, activeDrivers, todaysRevenue, todaysTickets });
+
+        // Calculate bus status data
+        const statusCounts = { active: 0, maintenance: 0, inactive: 0 };
+        buses.forEach(b => {
+          const status = String(b.status || '').toLowerCase();
+          if (status === 'active') statusCounts.active++;
+          else if (status.includes('maintenance') || status === 'maintenance') statusCounts.maintenance++;
+          else statusCounts.inactive++;
+        });
+        setBusStatusData([
+          { name: 'Active', value: statusCounts.active, color: COLORS.success },
+          { name: 'In Maintenance', value: statusCounts.maintenance, color: COLORS.secondary },
+          { name: 'Inactive', value: statusCounts.inactive, color: COLORS.danger },
+        ]);
+
+        // Get recent tickets (last 5, sorted by date)
+        const sortedTickets = [...tickets]
+          .sort((a, b) => {
+            const dateA = new Date(a.bookedAt || a.booked_at || a.created_at || 0);
+            const dateB = new Date(b.bookedAt || b.booked_at || b.created_at || 0);
+            return dateB.getTime() - dateA.getTime();
+          })
+          .slice(0, 5)
+          .map(t => ({
+            id: t.bookingReference || t.booking_reference || t.id || '—',
+            passenger: t.passengerName || t.passenger_name || (t.user && (t.user.full_name || t.user.name)) || '—',
+            route: (t.routeFrom || t.route_from || '—') + ' → ' + (t.routeTo || t.route_to || '—'),
+            date: t.bookedAt || t.booked_at || t.created_at ? new Date(t.bookedAt || t.booked_at || t.created_at).toISOString().split('T')[0] : '—',
+            amount: parseFloat(t.price || t.totalPrice || t.total_price || 0),
+            status: t.status || 'confirmed'
+          }));
+        setRecentTickets(sortedTickets);
+
+        // Calculate monthly revenue data (last 6 months)
+        const monthlyRevenue = new Map<string, { revenue: number; tickets: number }>();
+        const last6Months = [];
+        for (let i = 5; i >= 0; i--) {
+          const d = new Date();
+          d.setMonth(d.getMonth() - i);
+          const key = d.toISOString().slice(0, 7); // YYYY-MM
+          const monthName = d.toLocaleString('default', { month: 'short' });
+          last6Months.push({ key, monthName });
+          monthlyRevenue.set(key, { revenue: 0, tickets: 0 });
+        }
+
+        schedules.forEach(s => {
+          const scheduleDate = s.scheduleDate || s.date || s.schedule_date;
+          if (scheduleDate) {
+            const monthKey = scheduleDate.slice(0, 7); // YYYY-MM
+            if (monthlyRevenue.has(monthKey)) {
+              const totalSeats = s.totalSeats || s.total_seats || 0;
+              const availableSeats = (s.seatsAvailable != null ? s.seatsAvailable : s.seats_available) || 0;
+              const soldSeats = totalSeats - availableSeats;
+              const price = s.price || 0;
+              const scheduleRevenue = soldSeats * price;
+              
+              const current = monthlyRevenue.get(monthKey)!;
+              current.revenue += scheduleRevenue;
+              current.tickets += soldSeats;
+            }
+          }
+        });
+
+        const chartData = last6Months.map(m => {
+          const data = monthlyRevenue.get(m.key)!;
+          return {
+            month: m.monthName,
+            revenue: data.revenue,
+            tickets: data.tickets,
+            occupancy: 0 // Not calculating occupancy for now
+          };
+        });
+        setRevenueData(chartData);
       } catch (err) {
         console.warn('Failed to load KPI data', err);
       }
@@ -421,12 +481,12 @@ export default function CompanyDashboard() {
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-8">
-          {activeSection === 'dashboard' && <DashboardOverview kpis={kpis} activeBusesList={activeBusesList} />}
+          {activeSection === 'dashboard' && <DashboardOverview kpis={kpis} activeBusesList={activeBusesList} revenueData={revenueData} busStatusData={busStatusData} recentTickets={recentTickets} />}
           {activeSection === 'buses' && <BusesSection />}
           {activeSection === 'drivers' && <DriversSection />}
           {activeSection === 'schedules' && <SchedulesSection />}
-          {activeSection === 'tickets' && <TicketsSection />}
-          {activeSection === 'revenue' && <RevenueSection />}
+          {activeSection === 'tickets' && <TicketsManagement />}
+          {activeSection === 'revenue' && <RevenueReports />}
           {activeSection === 'tracking' && <TrackingSection />}
           {activeSection === 'settings' && <SettingsSection />}
         </main>
@@ -436,9 +496,12 @@ export default function CompanyDashboard() {
 }
 
 // Dashboard Overview Component
-function DashboardOverview({ kpis, activeBusesList }: { kpis: any; activeBusesList?: any[] }) {
+function DashboardOverview({ kpis, activeBusesList, revenueData, busStatusData, recentTickets }: { kpis: any; activeBusesList?: any[]; revenueData?: any[]; busStatusData?: any[]; recentTickets?: any[] }) {
   kpis = kpis || { totalBuses: 0, activeBuses: 0, activeRoutes: 0, activeDrivers: 0, todaysRevenue: 0, todaysTickets: 0 };
   activeBusesList = activeBusesList || [];
+  revenueData = revenueData || [];
+  busStatusData = busStatusData || [];
+  recentTickets = recentTickets || [];
   return (
     <div className="space-y-6">
       {/* Page Title */}
@@ -581,24 +644,31 @@ function DashboardOverview({ kpis, activeBusesList }: { kpis: any; activeBusesLi
             </button>
           </div>
           <div className="space-y-4">
-            {activeBusesList.map((bus) => (
-              <div key={bus.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-gradient-to-br from-[#0077B6] to-[#005F8E] rounded-xl flex items-center justify-center">
-                    <Bus className="w-6 h-6 text-white" />
-                  </div>
-                  <div>
-                    <div className="font-semibold text-gray-900">{bus.plate}</div>
-                    <div className="text-sm text-gray-600">{bus.driver}</div>
-                    <div className="text-xs text-gray-500 mt-1">{bus.route}</div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-semibold text-[#27AE60]">{typeof bus.occupancy === 'number' ? `${bus.occupancy}%` : bus.occupancy}</div>
-                  <div className="text-xs text-gray-500 mt-1">ETA: {bus.eta}</div>
-                </div>
+            {activeBusesList.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <Bus className="w-12 h-12 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No active buses at the moment</p>
               </div>
-            ))}
+            ) : (
+              activeBusesList.map((bus) => (
+                <div key={bus.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-gradient-to-br from-[#0077B6] to-[#005F8E] rounded-xl flex items-center justify-center">
+                      <Bus className="w-6 h-6 text-white" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-gray-900">{bus.plate}</div>
+                      <div className="text-sm text-gray-600">{bus.driver}</div>
+                      <div className="text-xs text-gray-500 mt-1">{bus.route}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-semibold text-[#27AE60]">{typeof bus.occupancy === 'number' ? `${bus.occupancy}%` : bus.occupancy}</div>
+                    <div className="text-xs text-gray-500 mt-1">ETA: {bus.eta}</div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
@@ -613,27 +683,34 @@ function DashboardOverview({ kpis, activeBusesList }: { kpis: any; activeBusesLi
             </button>
           </div>
           <div className="space-y-3">
-            {recentTickets.map((ticket) => (
-              <div key={ticket.id} className="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:border-[#0077B6] transition-colors">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-semibold text-gray-900">{ticket.id}</span>
-                    <span className={`
-                      text-xs px-2 py-0.5 rounded-full font-medium
-                      ${ticket.status === 'confirmed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}
-                    `}>
-                      {ticket.status}
-                    </span>
-                  </div>
-                  <div className="text-sm text-gray-600">{ticket.passenger}</div>
-                  <div className="text-xs text-gray-500 mt-1">{ticket.route}</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-bold text-gray-900">RWF {ticket.amount.toLocaleString()}</div>
-                  <div className="text-xs text-gray-500 mt-1">{ticket.date}</div>
-                </div>
+            {recentTickets.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <Ticket className="w-12 h-12 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No recent tickets</p>
               </div>
-            ))}
+            ) : (
+              recentTickets.map((ticket) => (
+                <div key={ticket.id} className="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:border-[#0077B6] transition-colors">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm font-semibold text-gray-900">{ticket.id}</span>
+                      <span className={`
+                        text-xs px-2 py-0.5 rounded-full font-medium
+                        ${ticket.status === 'confirmed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}
+                      `}>
+                        {ticket.status}
+                      </span>
+                    </div>
+                    <div className="text-sm text-gray-600">{ticket.passenger}</div>
+                    <div className="text-xs text-gray-500 mt-1">{ticket.route}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-bold text-gray-900">RWF {ticket.amount.toLocaleString()}</div>
+                    <div className="text-xs text-gray-500 mt-1">{ticket.date}</div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -1025,46 +1102,38 @@ function SchedulesSection() {
                 <th className="px-3 py-2 border-b">Arrival</th>
                 <th className="px-3 py-2 border-b">Seats</th>
                 <th className="px-3 py-2 border-b">Price</th>
+                <th className="px-3 py-2 border-b">Revenue</th>
                 <th className="px-3 py-2 border-b">Driver</th>
               </tr>
             </thead>
             <tbody>
-              {schedules.map((s) => (
-                <tr key={s.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-2 border-b">{s.scheduleDate || s.date || s.schedule_date || '—'}</td>
-                  <td className="px-3 py-2 border-b">{(s.routeFrom || '—') + ' → ' + (s.routeTo || '—')}</td>
-                  <td className="px-3 py-2 border-b">{s.busPlateNumber || (s.Bus && (s.Bus.plate_number || s.Bus.plateNumber)) || '—'}</td>
-                  <td className="px-3 py-2 border-b">{s.departureTime || '—'}</td>
-                  <td className="px-3 py-2 border-b">{s.arrivalTime || '—'}</td>
-                  <td className="px-3 py-2 border-b">{(s.seatsAvailable != null ? s.seatsAvailable : s.seats_available) + '/' + (s.totalSeats || s.total_seats || '—')}</td>
-                  <td className="px-3 py-2 border-b">{s.price ? `RWF ${s.price}` : '—'}</td>
-                  <td className="px-3 py-2 border-b">{s.driverName || (s.driver && (s.driver.full_name || s.driver.name)) || '—'}</td>
-                </tr>
-              ))}
+              {schedules.map((s) => {
+                const totalSeats = s.totalSeats || s.total_seats || 0;
+                const availableSeats = (s.seatsAvailable != null ? s.seatsAvailable : s.seats_available) || 0;
+                const soldSeats = totalSeats - availableSeats;
+                const price = s.price || 0;
+                const revenue = soldSeats * price;
+                
+                return (
+                  <tr key={s.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 border-b">{s.scheduleDate || s.date || s.schedule_date || '—'}</td>
+                    <td className="px-3 py-2 border-b">{(s.routeFrom || '—') + ' → ' + (s.routeTo || '—')}</td>
+                    <td className="px-3 py-2 border-b">{s.busPlateNumber || (s.Bus && (s.Bus.plate_number || s.Bus.plateNumber)) || '—'}</td>
+                    <td className="px-3 py-2 border-b">{s.departureTime || '—'}</td>
+                    <td className="px-3 py-2 border-b">{s.arrivalTime || '—'}</td>
+                    <td className="px-3 py-2 border-b">{availableSeats + '/' + (totalSeats || '—')}</td>
+                    <td className="px-3 py-2 border-b">{price ? `RWF ${price.toLocaleString()}` : '—'}</td>
+                    <td className="px-3 py-2 border-b font-semibold text-[#27AE60]">{revenue > 0 ? `RWF ${revenue.toLocaleString()}` : 'RWF 0'}</td>
+                    <td className="px-3 py-2 border-b">{s.driverName || (s.driver && (s.driver.full_name || s.driver.name)) || '—'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
 
       {showAdd && <AddScheduleModal token={token} buses={buses} onClose={() => { setShowAdd(false); window.location.reload(); }} />}
-    </div>
-  );
-}
-
-function TicketsSection() {
-  return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm">
-      <h2 className="text-2xl font-['Montserrat'] font-bold text-[#2B2D42] mb-4">Tickets Management</h2>
-      <p className="text-gray-600">Ticket management interface coming soon...</p>
-    </div>
-  );
-}
-
-function RevenueSection() {
-  return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm">
-      <h2 className="text-2xl font-['Montserrat'] font-bold text-[#2B2D42] mb-4">Revenue & Reports</h2>
-      <p className="text-gray-600">Revenue analytics interface coming soon...</p>
     </div>
   );
 }

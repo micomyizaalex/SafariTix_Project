@@ -19,6 +19,7 @@ const Schedule = sequelize.define(
     departure_time: { type: DataTypes.DATE, allowNull: false },
     arrival_time: { type: DataTypes.DATE, allowNull: false },
     price_per_seat: { type: DataTypes.DECIMAL, allowNull: false },
+    total_seats: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 30 },
     available_seats: { type: DataTypes.INTEGER, allowNull: false },
     booked_seats: { type: DataTypes.INTEGER, defaultValue: 0 },
 

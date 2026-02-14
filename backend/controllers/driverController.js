@@ -32,7 +32,7 @@ function mapTicketRow(row) {
 			plateNumber: row.bus_plate,
 		},
 		companyId: row.company_id,
-		isUsed: row.status === 'checked_in',
+		isUsed: row.status === 'CHECKED_IN',
 	};
 }
 
@@ -475,19 +475,19 @@ const scanTicket = async (req, res) => {
 			return res.status(403).json({ error: 'Ticket not in your company', valid: false, message: 'Unauthorized ticket' });
 		}
 
-		if (ticketRow.status === 'cancelled' || ticketRow.status === 'refunded') {
+		if (ticketRow.status === 'CANCELLED' || ticketRow.status === 'EXPIRED') {
 			await client.query('ROLLBACK');
 			return res.status(400).json({ valid: false, message: 'Ticket is not valid for travel', ticket: mapTicketRow(ticketRow) });
 		}
 
-		if (ticketRow.status === 'checked_in') {
+		if (ticketRow.status === 'CHECKED_IN') {
 			await client.query('COMMIT');
 			return res.status(200).json({ valid: false, message: 'Ticket already used', ticket: mapTicketRow(ticketRow) });
 		}
 
 		const updateResult = await client.query(
 			'UPDATE tickets SET status = $1, checked_in_at = NOW() WHERE id = $2 AND status = $3 RETURNING checked_in_at',
-			['checked_in', ticketRow.id, 'booked']
+			['CHECKED_IN', ticketRow.id, 'CONFIRMED']
 		);
 
 		if (updateResult.rowCount === 0) {
@@ -497,7 +497,7 @@ const scanTicket = async (req, res) => {
 
 		await client.query('COMMIT');
 
-		const mapped = mapTicketRow({ ...ticketRow, status: 'checked_in', checked_in_at: updateResult.rows[0].checked_in_at });
+		const mapped = mapTicketRow({ ...ticketRow, status: 'CHECKED_IN', checked_in_at: updateResult.rows[0].checked_in_at });
 		return res.json({ valid: true, message: 'Ticket validated', ticket: mapped });
 	} catch (error) {
 		if (client) {

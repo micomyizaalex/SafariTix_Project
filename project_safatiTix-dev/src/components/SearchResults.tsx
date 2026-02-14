@@ -103,7 +103,8 @@ export default function SearchResults({ results, onSelect, className = '' }: Pro
         const total = Number(s.totalSeats ?? s.total_seats ?? s.capacity ?? 0);
         const available = Number(s.seatsAvailable ?? s.availableSeats ?? s.available_seats ?? s.available ?? s.seats ?? 0);
         const filled = Math.max(0, total - available);
-        const percent = total > 0 ? Math.round((filled / total) * 100) : 0;
+        const sold = Number(s.soldSeats ?? s.sold_seats ?? filled);
+        const percentSold = total > 0 ? Math.min(100, Math.round((sold / total) * 100)) : 0;
         const low = available > 0 && available < 5;
         const plenty = available >= 20;
         const soldOut = available <= 0;
@@ -174,10 +175,10 @@ export default function SearchResults({ results, onSelect, className = '' }: Pro
 
             <div className="mt-4">
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                <div className={`${available > 15 ? 'bg-emerald-500' : (available >= 5 ? 'bg-amber-500' : 'bg-red-500')} h-2 rounded-full transition-all duration-300`} style={{ width: `${percent}%` }} />
+                <div className={`${available > 15 ? 'bg-emerald-500' : (available >= 5 ? 'bg-amber-500' : 'bg-red-500')} h-2 rounded-full transition-all duration-300`} style={{ width: `${percentSold}%` }} />
               </div>
               <div className="mt-2 text-sm text-slate-600 flex items-center justify-between">
-                <div className="text-slate-900 font-semibold">{percent}%</div>
+                <div className="text-slate-900 font-semibold">{percentSold}% sold</div>
                 <div className="text-slate-500">{available} seats available</div>
               </div>
             </div>

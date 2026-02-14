@@ -1,4 +1,4 @@
-const { Company, Bus, Schedule, Ticket, User, Driver, Route, DriverAssignment } = require('../models');
+const { Company, Bus, Schedule, Ticket, User, Driver, Route, DriverAssignment, Payment } = require('../models');
 const crypto = require('crypto');
 const { Op } = require('sequelize');
 const busService = require('../services/busService');
@@ -370,6 +370,54 @@ const getTickets = async (req, res) => {
     res.json({ tickets: mapped });
   } catch (error) {
     console.error('getTickets error:', error);
+    res.status(400).json({ error: error.message });
+  }
+};
+
+const updateTicket = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const userId = req.userId;
+    const companyId = req.companyId || (await User.findByPk(userId)).company_id;
+
+    if (!companyId) {
+      return res.status(403).json({ error: 'No company associated with user' });
+    }
+
+    // Find ticket
+    const ticket = await Ticket.findByPk(id);
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    // Verify ticket belongs to company
+    if (ticket.company_id !== companyId) {
+      return res.status(403).json({ error: 'Unauthorized to update this ticket' });
+    }
+
+    // Update ticket status
+    if (status) {
+      ticket.status = status;
+      
+      // If marking as checked in, set checked_in_at timestamp
+      if (status === 'CHECKED_IN' && !ticket.checked_in_at) {
+        ticket.checked_in_at = new Date();
+      }
+      
+      await ticket.save();
+    }
+
+    res.json({ 
+      message: 'Ticket updated successfully', 
+      ticket: {
+        id: ticket.id,
+        status: ticket.status,
+        checkedInAt: ticket.checked_in_at
+      }
+    });
+  } catch (error) {
+    console.error('updateTicket error:', error);
     res.status(400).json({ error: error.message });
   }
 };
@@ -1112,6 +1160,166 @@ const getDashboardStats = async (req, res) => {
   }
 };
 
+const getRevenue = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const companyId = req.companyId || (await User.findByPk(userId)).company_id;
+    if (!companyId) {
+      return res.json({
+        totalRevenue: 0,
+        totalTickets: 0,
+        todayRevenue: 0,
+        todayTickets: 0,
+        weekRevenue: 0,
+        weekTickets: 0,
+        monthRevenue: 0,
+        monthTickets: 0,
+        dailyRevenue: [],
+        breakdownByRoute: []
+      });
+    }
+
+    const { startDate, endDate } = req.query;
+
+    // Build date filters
+    let dateFilter = {};
+    if (startDate && endDate) {
+      dateFilter = {
+        schedule_date: {
+          [Op.between]: [startDate, endDate]
+        }
+      };
+    }
+
+    // Fetch all schedules for the company
+    const schedules = await Schedule.findAll({
+      where: {
+        company_id: companyId,
+        ...dateFilter
+      },
+      include: [
+        {
+          model: Route,
+          attributes: ['id', 'origin', 'destination']
+        },
+        {
+          model: Bus,
+          attributes: ['id', 'plate_number']
+        }
+      ],
+      order: [['schedule_date', 'DESC']]
+    });
+
+    // Calculate revenue from schedules (sold seats × price)
+    let totalRevenue = 0;
+    let totalTickets = 0;
+    const dailyRevenueMap = new Map();
+    const routeBreakdownMap = new Map();
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0];
+
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const weekAgoStr = weekAgo.toISOString().split('T')[0];
+
+    const monthAgo = new Date(today);
+    monthAgo.setMonth(monthAgo.getMonth() - 1);
+    const monthAgoStr = monthAgo.toISOString().split('T')[0];
+
+    let todayRevenue = 0;
+    let todayTickets = 0;
+    let weekRevenue = 0;
+    let weekTickets = 0;
+    let monthRevenue = 0;
+    let monthTickets = 0;
+
+    schedules.forEach(s => {
+      const totalSeats = s.total_seats || 0;
+      const availableSeats = s.available_seats != null ? s.available_seats : totalSeats;
+      const soldSeats = totalSeats - availableSeats;
+      const price = parseFloat(s.price_per_seat || 0);
+      const scheduleRevenue = soldSeats * price;
+
+      totalRevenue += scheduleRevenue;
+      totalTickets += soldSeats;
+
+      const scheduleDate = s.schedule_date;
+      if (scheduleDate) {
+        // Daily revenue aggregation
+        if (!dailyRevenueMap.has(scheduleDate)) {
+          dailyRevenueMap.set(scheduleDate, { date: scheduleDate, revenue: 0, tickets: 0 });
+        }
+        const dayData = dailyRevenueMap.get(scheduleDate);
+        dayData.revenue += scheduleRevenue;
+        dayData.tickets += soldSeats;
+
+        // Today's revenue
+        if (scheduleDate === todayStr) {
+          todayRevenue += scheduleRevenue;
+          todayTickets += soldSeats;
+        }
+
+        // Week revenue
+        if (scheduleDate >= weekAgoStr) {
+          weekRevenue += scheduleRevenue;
+          weekTickets += soldSeats;
+        }
+
+        // Month revenue
+        if (scheduleDate >= monthAgoStr) {
+          monthRevenue += scheduleRevenue;
+          monthTickets += soldSeats;
+        }
+      }
+
+      // Route breakdown
+      const route = s.Route;
+      const routeName = route ? `${route.origin} → ${route.destination}` : 'Unknown Route';
+      const key = `${routeName}_${scheduleDate}_${s.departure_time}`;
+      
+      if (!routeBreakdownMap.has(key)) {
+        routeBreakdownMap.set(key, {
+          route: routeName,
+          scheduleDate: scheduleDate || '—',
+          departureTime: s.departure_time || '—',
+          ticketsSold: 0,
+          revenue: 0
+        });
+      }
+      const routeData = routeBreakdownMap.get(key);
+      routeData.ticketsSold += soldSeats;
+      routeData.revenue += scheduleRevenue;
+    });
+
+    // Convert maps to arrays
+    const dailyRevenue = Array.from(dailyRevenueMap.values())
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-30); // Last 30 days
+
+    const breakdownByRoute = Array.from(routeBreakdownMap.values())
+      .sort((a, b) => b.revenue - a.revenue);
+
+    res.json({
+      totalRevenue: Math.round(totalRevenue),
+      totalTickets,
+      todayRevenue: Math.round(todayRevenue),
+      todayTickets,
+      weekRevenue: Math.round(weekRevenue),
+      weekTickets,
+      monthRevenue: Math.round(monthRevenue),
+      monthTickets,
+      dailyRevenue,
+      breakdownByRoute
+    });
+
+  } catch (error) {
+    console.error('getRevenue error:', error);
+    res.status(400).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getCompany,
   getBuses,
@@ -1122,6 +1330,7 @@ module.exports = {
   updateSchedule,
   deleteSchedule,
   getTickets,
+  updateTicket,
   getDrivers,
   createDriver,
   getDriver,
@@ -1132,7 +1341,8 @@ module.exports = {
   deleteBus,
   reopenScheduleTickets,
   getScheduleJournals,
-  getDashboardStats
+  getDashboardStats,
+  getRevenue
 };
 
 

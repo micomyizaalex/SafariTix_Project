@@ -83,9 +83,8 @@ const getAvailableSchedules = async (req, res) => {
         price: parseFloat(s.price_per_seat || 0),
         seatsAvailable: s.available_seats,
         bookedSeats: s.booked_seats || 0,
-        status: s.status
-        ,
-        ticketStatus: s.ticket_status || 'OPEN',
+          status: s.status,
+          ticketStatus: s.ticket_status || 'OPEN',
         ticketReason: (s.ticket_status === 'CLOSED') ? 'manual' : null
       }));
 
@@ -311,6 +310,7 @@ const getTickets = async (req, res) => {
         t.schedule_id,
         u.full_name as passenger_name,
         u.email as passenger_email,
+        u.phone_number,
         p.payment_method,
         p.status as payment_status,
         p.transaction_ref,
@@ -340,6 +340,9 @@ const getTickets = async (req, res) => {
       seatNumber: row.seat_number,
       seat: row.seat_number,
       bookingRef: row.booking_ref,
+      // QR code fields - use ticket ID as the scannable code
+      qrCode: row.id,
+      qrData: row.id, // Driver will scan this ID to check-in
       // price numeric
       price: parseFloat(row.price || 0),
       // original status and a human-friendly label
@@ -366,7 +369,11 @@ const getTickets = async (req, res) => {
       time: row.departure_time,
       busPlate: row.bus_plate || 'N/A',
       busModel: row.bus_model || 'N/A',
-      bus: row.bus_plate || row.bus_model || 'N/A'
+      bus: row.bus_plate || row.bus_model || 'N/A',
+      // Passenger details for display
+      name: row.passenger_name || 'N/A',
+      email: row.passenger_email || 'N/A',
+      phone: row.phone_number || 'N/A'
     }));
 
     res.json({ tickets });
@@ -681,7 +688,11 @@ const getTicketById = async (req, res) => {
       id: row.id,
       ticketId: row.id,
       seatNumber: row.seat_number,
+      seat: row.seat_number,
       bookingRef: row.booking_ref,
+      // QR code fields for scanning
+      qrCode: row.id,
+      qrData: row.id,
       price: parseFloat(row.price || 0),
       status: row.status,
       paymentMethod: row.payment_method || null,
@@ -696,15 +707,23 @@ const getTicketById = async (req, res) => {
       passengerName: row.passenger_name,
       passengerEmail: row.passenger_email,
       passengerPhone: row.passenger_phone,
+      name: row.passenger_name,
+      email: row.passenger_email,
+      phone: row.passenger_phone,
       routeFrom: row.route_from,
       routeTo: row.route_to,
+      from: row.route_from,
+      to: row.route_to,
       departureTime: row.departure_time,
       arrivalTime: row.arrival_time,
       scheduleDate: row.schedule_date,
       travelDate: row.schedule_date,
+      date: row.schedule_date,
+      time: row.departure_time,
       busPlate: row.bus_plate,
       busPlateNumber: row.bus_plate,
       busModel: row.bus_model,
+      bus: row.bus_plate || row.bus_model || 'N/A',
       companyName: row.company_name
     };
 
