@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../components/AuthContext';
 import SeatMap from '../../components/SeatMap';
+import SearchResults from '../../components/SearchResults';
+import PopularRoutes, { PopularRoute } from '../../components/PopularRoutes';
 
 export default function CommuterDashboard() {
   const { user, signOut, accessToken } = useAuth();
@@ -403,84 +405,33 @@ export default function CommuterDashboard() {
         )}
 
         {searchResults.length > 0 && (
-          <div className="mt-4 grid gap-3">
-            {searchResults.map((s: any) => {
-              const duration = calcDuration(s.departureTime || s.departure_time, s.arrivalTime || s.arrival_time);
-              const from = s.routeFrom || s.from_location || s.from || s.from_location;
-              const to = s.routeTo || s.to_location || s.to || s.to_location;
-              const seats = s.seatsAvailable ?? s.available_seats ?? s.availableSeats ?? 0;
-              const price = s.price ?? s.fare ?? s.price_per_seat ?? 0;
-              return (
-                <div key={s.id || `${from}-${to}-${s.departureTime}`} className="bg-white rounded-xl p-4 border shadow-sm flex items-center justify-between">
-                  <div>
-                    <div className="font-semibold text-gray-900">{from} → {to}</div>
-                    <div className="text-sm text-gray-500">{duration ? `${duration} • ${new Date(s.departureTime || s.departure_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : (s.departureTime || s.departure_time)}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-bold text-[#0077B6]">{formatCurrency(price)}</div>
-                    <div className="text-sm text-gray-500">{seats} seats</div>
-                    <div className="mt-2">
-                      <button onClick={() => { setSelectedTicket(s); setShowTicketModal(true); }} className="bg-[#0077B6] text-white px-3 py-1 rounded">Book</button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="mt-4">
+            <SearchResults
+              results={searchResults}
+              onSelect={(s) => { setSelectedTicket(s); setShowTicketModal(true); }}
+            />
           </div>
         )}
       </div>
 
-      {/* Popular Routes */}
-      <div className="bg-white rounded-2xl shadow-xl p-6 lg:p-8 border border-gray-100">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
-            <div className="w-10 h-10 bg-[#0077B6]/10 rounded-xl flex items-center justify-center">
-              <Star className="w-5 h-5 text-[#0077B6]" />
-            </div>
-            Popular Routes
-          </h3>
-          <button className="text-[#0077B6] font-semibold hover:underline">View All</button>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {popularRoutes.map((route, index) => (
-            <div
-              key={index}
-              className="group border-2 border-gray-100 rounded-xl p-5 hover:border-[#0077B6] hover:shadow-lg transition-all duration-300 cursor-pointer"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-[#0077B6]/10 rounded-xl flex items-center justify-center group-hover:bg-[#0077B6] transition-all duration-300">
-                    <Bus className="w-6 h-6 text-[#0077B6] group-hover:text-white transition-all duration-300" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-lg text-gray-900">
-                      {route.from} → {route.to}
-                    </div>
-                    <div className="text-sm text-gray-500 flex items-center gap-2">
-                      <Clock className="w-4 h-4" />
-                      {route.duration}
-                    </div>
-                  </div>
-                </div>
-                <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-[#0077B6] transition-all duration-300" />
-              </div>
-              
-              <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                <div>
-                  <div className="text-xs text-gray-500 mb-1">Starting from</div>
-                  <div className="text-xl font-bold text-[#0077B6]">
-                    RWF {route.price.toLocaleString()}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-xs text-gray-500 mb-1">Available</div>
-                  <div className="text-lg font-bold text-gray-900">{route.available} seats</div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+      {/* Popular Routes (redesigned) */}
+      <div>
+        <PopularRoutes
+          routes={popularRoutes.map((s: any): PopularRoute => ({
+            id: s.id || Math.random() * 100000,
+            from: s.routeFrom || s.from || s.origin || s.from_location || s.from_location_name || 'Unknown',
+            to: s.routeTo || s.to || s.destination || s.to_location || s.to_location_name || 'Unknown',
+            departureDate: s.date || s.departureDate || s.departure_date || (s.schedule_date ? s.schedule_date : new Date().toISOString().slice(0,10)),
+            departureTime: s.time || s.departureTime || s.departure_time || s.start_time || '08:00 AM',
+            duration: s.duration || calcDuration(s.departureTime || s.departure_time || s.start_time, s.arrivalTime || s.arrival_time || s.end_time) || s.duration,
+            price: Number(s.price ?? s.fare ?? s.price_per_seat ?? 0),
+            availableSeats: Number(s.seatsAvailable ?? s.availableSeats ?? s.available_seats ?? (s.totalSeats ? s.totalSeats - (s.soldSeats||0) : 0)),
+            totalSeats: Number(s.totalSeats ?? s.total_seats ?? s.capacity ?? 0),
+            company: s.company || s.operator || s.companyName || '',
+            popular: !!s.popular,
+          }))}
+          onSelect={(r) => { setSelectedTicket(r); setShowTicketModal(true); }}
+        />
       </div>
 
       {/* Quick Stats */}

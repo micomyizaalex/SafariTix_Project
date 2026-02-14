@@ -8,6 +8,8 @@ const ctrl = require('../controllers/driverController');
 router.get('/me', authenticate, requireRoles(['driver']), ctrl.getMe);
 router.get('/bus', authenticate, requireRoles(['driver']), ctrl.getAssignedBus);
 router.get('/today-schedule', authenticate, requireRoles(['driver']), ctrl.getTodaySchedule);
+router.get('/my-trips', authenticate, requireRoles(['driver']), ctrl.getMyTrips);
+router.get('/dashboard', authenticate, requireRoles(['driver']), ctrl.getDashboard);
 router.post('/start-trip', authenticate, requireRoles(['driver']), ctrl.startTrip);
 router.post('/end-trip', authenticate, requireRoles(['driver']), ctrl.endTrip);
 router.post('/location', authenticate, requireRoles(['driver']), ctrl.postLocation);

@@ -336,10 +336,15 @@ const getTickets = async (req, res) => {
 
     const tickets = result.rows.map(row => ({
       id: row.id,
+      // seatNumber kept for compatibility, and `seat` used by frontend
       seatNumber: row.seat_number,
+      seat: row.seat_number,
       bookingRef: row.booking_ref,
+      // price numeric
       price: parseFloat(row.price || 0),
+      // original status and a human-friendly label
       status: row.status,
+      statusLabel: (row.status || '').toString().toUpperCase() === 'CONFIRMED' ? 'Confirmed' : (row.status || 'N/A'),
       paymentMethod: row.payment_method || 'N/A',
       paymentStatus: row.payment_status || 'N/A',
       transactionRef: row.transaction_ref,
@@ -348,13 +353,20 @@ const getTickets = async (req, res) => {
       scheduleId: row.schedule_id,
       passengerName: row.passenger_name || 'N/A',
       passengerEmail: row.passenger_email || 'N/A',
+      // Provide both backend field names and frontend-friendly aliases
       routeFrom: row.route_from || 'N/A',
       routeTo: row.route_to || 'N/A',
+      from: row.route_from || 'N/A',
+      to: row.route_to || 'N/A',
+      // Date and time fields (frontend expects `date` and `time`)
       departureTime: row.departure_time,
       arrivalTime: row.arrival_time,
       scheduleDate: row.schedule_date,
+      date: row.schedule_date,
+      time: row.departure_time,
       busPlate: row.bus_plate || 'N/A',
-      busModel: row.bus_model || 'N/A'
+      busModel: row.bus_model || 'N/A',
+      bus: row.bus_plate || row.bus_model || 'N/A'
     }));
 
     res.json({ tickets });

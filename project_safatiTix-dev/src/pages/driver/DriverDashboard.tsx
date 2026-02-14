@@ -22,22 +22,7 @@ const todayStats = {
   revenue: 397500,
 };
 
-const activeTrip = {
-  id: 'TRIP-001',
-  route: 'Kigali → Gisenyi',
-  bus: 'RAB-101A',
-  departure: '08:00 AM',
-  arrival: '11:30 AM',
-  progress: 65,
-  eta: '45 min',
-  passengers: 24,
-  totalSeats: 29,
-};
-
-const upcomingTrips = [
-  { id: 1, route: 'Gisenyi → Kigali', time: '2:00 PM', bus: 'RAB-101A', passengers: 18, total: 29 },
-  { id: 2, route: 'Kigali → Butare', time: '4:30 PM', bus: 'RAB-202B', passengers: 22, total: 29 },
-];
+// Trips will be fetched from backend; no hardcoded mock trips
 
 const recentPassengers = [
   { id: 1, name: 'Alice Nzabonimana', seat: '5', ticket: 'TKT-1245', checked: true, time: '07:45 AM' },
@@ -61,6 +46,13 @@ export default function DriverDashboard() {
   const [schedules, setSchedules] = useState([]);
   const [driverContext, setDriverContext] = useState(null);
   const [companyName, setCompanyName] = useState(null);
+  const [trips, setTrips] = useState<any[]>([]);
+  const [tripsLoading, setTripsLoading] = useState(false);
+  const [tripsError, setTripsError] = useState<string | null>(null);
+  const [activeTrip, setActiveTrip] = useState<any | null>(null);
+  const [upcomingTrips, setUpcomingTrips] = useState<any[]>([]);
+  const [dashboardStats, setDashboardStats] = useState({ tripsCompleted: 0, activeTrips: 0, totalPassengers: 0, revenue: 0 });
+  const [recentPassengersState, setRecentPassengersState] = useState<any[]>(recentPassengers);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -97,8 +89,53 @@ export default function DriverDashboard() {
         // ignore
       }
     };
-
     fetchData();
+
+    // Fetch driver's trips (My Trips)
+    const loadTrips = async () => {
+      setTripsLoading(true);
+      setTripsError(null);
+      try {
+        const res = await fetch('/api/driver/my-trips', { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!mounted) return;
+        if (!res.ok) {
+          const txt = await res.text().catch(() => null);
+          throw new Error(txt || `Failed to load trips: ${res.status}`);
+        }
+        const j = await res.json();
+        if (!mounted) return;
+        // expect { trips: [...] } or array directly
+        const loaded = Array.isArray(j) ? j : (j.trips || j.data || []);
+        setTrips(loaded);
+        // compute active and upcoming trips for dashboard
+        const act = loaded.find((t: any) => String(t.status).toUpperCase() === 'ACTIVE') || null;
+        setActiveTrip(act);
+        setUpcomingTrips(loaded.filter((t: any) => String(t.status).toUpperCase() !== 'ACTIVE'));
+      } catch (err: any) {
+        if (mounted) setTripsError(err.message || 'Failed to load trips');
+      } finally {
+        if (mounted) setTripsLoading(false);
+      }
+    };
+
+    loadTrips();
+
+    // Load dashboard aggregates (stats, upcoming trips, recent check-ins)
+    const loadDashboard = async () => {
+      try {
+        const res = await fetch('/api/driver/dashboard', { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!res.ok) return;
+        const j = await res.json();
+        if (!mounted) return;
+        const s = j.stats || {};
+        setDashboardStats({ tripsCompleted: s.completed || 0, activeTrips: s.active || 0, totalPassengers: s.passengers || 0, revenue: s.revenue || 0 });
+        setUpcomingTrips(j.upcoming || []);
+        setRecentPassengersState(j.recentCheckins || []);
+      } catch (e) {
+        // ignore
+      }
+    };
+    loadDashboard();
     return () => { mounted = false; };
   }, [accessToken]);
 
@@ -154,7 +191,7 @@ export default function DriverDashboard() {
         <nav className="p-3 space-y-1">
           {[
             { id: 'dashboard', icon: Home, label: 'Dashboard', badge: null },
-            { id: 'trips', icon: Calendar, label: 'My Trips', badge: '3' },
+            { id: 'trips', icon: Calendar, label: 'My Trips', badge: trips.length || null },
             { id: 'passengers', icon: Users, label: 'Passengers', badge: null },
             { id: 'tracking', icon: MapPin, label: 'Live Tracking', badge: null },
             { id: 'profile', icon: User, label: 'Profile', badge: null },
@@ -221,8 +258,8 @@ export default function DriverDashboard() {
       {/* ========== MAIN CONTENT ========== */}
       <main className="lg:ml-64 pt-16 lg:pt-0 min-h-screen">
         <div className="p-4 lg:p-6 xl:p-8">
-          {activeView === 'dashboard' && <DashboardView setShowScanner={setShowScanner} driverName={driverName} schedules={schedules} user={user} />}
-          {activeView === 'trips' && <TripsView />}
+          {activeView === 'dashboard' && <DashboardView setShowScanner={setShowScanner} driverName={driverName} schedules={schedules} user={user} activeTrip={activeTrip} upcomingTrips={upcomingTrips} dashboardStats={dashboardStats} recentPassengers={recentPassengersState} />}
+          {activeView === 'trips' && <TripsView trips={trips} loading={tripsLoading} error={tripsError} />}
           {activeView === 'passengers' && <PassengersView setShowScanner={setShowScanner} />}
           {activeView === 'tracking' && <TrackingView />}
           {activeView === 'profile' && <ProfileView />}
@@ -236,7 +273,7 @@ export default function DriverDashboard() {
 }
 
 // ==================== DASHBOARD VIEW ====================
-function DashboardView({ setShowScanner, driverName, schedules, user }) {
+function DashboardView({ setShowScanner, driverName, schedules, user, activeTrip, upcomingTrips, dashboardStats, recentPassengers }: { setShowScanner: any, driverName: any, schedules: any[], user: any, activeTrip: any, upcomingTrips: any[], dashboardStats: any, recentPassengers: any[] }) {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       
@@ -252,7 +289,8 @@ function DashboardView({ setShowScanner, driverName, schedules, user }) {
               {schedules.map((s, idx) => {
                 const title = s.route || s.name || `${s.from || s.origin || s.start || ''} → ${s.to || s.destination || s.end || ''}`.replace(/(^\s+|\s+$|\s+→\s+$)/g, '')|| 'Schedule';
                 const time = s.departure_time || s.time || s.start_time || (s.schedule_date ? new Date(s.schedule_date).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '—');
-                const bus = s.bus_registration || s.bus_reg || s.bus || s.busId || '';
+                const busObj = s.bus;
+                const bus = (busObj && typeof busObj === 'object') ? (busObj.plateNumber || busObj.plate_number || String(busObj.id || '')) : (s.bus_registration || s.bus_reg || s.bus || s.busId || '');
                 return (
                   <div key={idx} className="flex items-center justify-between bg-white rounded-lg p-3 border border-slate-100">
                     <div>
@@ -277,10 +315,10 @@ function DashboardView({ setShowScanner, driverName, schedules, user }) {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={CheckCircle} label="Completed" value={todayStats.tripsCompleted} color="#27AE60" />
-        <StatCard icon={Activity} label="Active Trips" value={todayStats.activeTrips} color="#0077B6" />
-        <StatCard icon={Users} label="Passengers" value={todayStats.totalPassengers} color="#F4A261" />
-        <StatCard icon={DollarSign} label="Revenue" value={`${(todayStats.revenue / 1000).toFixed(0)}K`} color="#2B2D42" />
+        <StatCard icon={CheckCircle} label="Completed" value={dashboardStats.tripsCompleted} color="#27AE60" />
+        <StatCard icon={Activity} label="Active Trips" value={dashboardStats.activeTrips} color="#0077B6" />
+        <StatCard icon={Users} label="Passengers" value={dashboardStats.totalPassengers} color="#F4A261" />
+        <StatCard icon={DollarSign} label="Revenue" value={`${(dashboardStats.revenue / 1000).toFixed(0)}K`} color="#2B2D42" />
       </div>
 
       {/* Active Trip - Hero Section */}
@@ -297,8 +335,8 @@ function DashboardView({ setShowScanner, driverName, schedules, user }) {
                   <Activity className="w-3 h-3 animate-pulse" />
                   ACTIVE TRIP
                 </div>
-                <h2 className="text-2xl lg:text-3xl font-black mb-2">{activeTrip.route}</h2>
-                <p className="text-white/80 text-sm">{activeTrip.bus} • {activeTrip.departure}</p>
+                <h2 className="text-2xl lg:text-3xl font-black mb-2">{activeTrip.route || (activeTrip.routeFrom && activeTrip.routeTo ? `${activeTrip.routeFrom} → ${activeTrip.routeTo}` : '')}</h2>
+                <p className="text-white/80 text-sm">{(activeTrip.bus && typeof activeTrip.bus === 'object') ? (activeTrip.bus.plateNumber || activeTrip.bus.plate_number || activeTrip.bus.id) : activeTrip.bus} • {activeTrip.departure || activeTrip.departureTime || '—'}</p>
               </div>
               <div className="text-right">
                 <div className="text-xs text-white/70 mb-1">ETA</div>
@@ -351,21 +389,28 @@ function DashboardView({ setShowScanner, driverName, schedules, user }) {
               <div key={trip.id} className="group border-2 border-slate-100 hover:border-[#0077B6] rounded-xl p-4 transition-all cursor-pointer">
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <div className="font-bold text-slate-900 group-hover:text-[#0077B6] transition-colors">{trip.route}</div>
-                    <div className="text-sm text-slate-500">{trip.bus}</div>
+                    <div className="font-bold text-slate-900 group-hover:text-[#0077B6] transition-colors">{trip.route || (trip.routeFrom && trip.routeTo ? `${trip.routeFrom} → ${trip.routeTo}` : '')}</div>
+                    <div className="text-sm text-slate-500">{(trip.bus && typeof trip.bus === 'object') ? (trip.bus.plateNumber || trip.bus.plate_number || trip.bus.id) : (trip.bus || '—')}</div>
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-bold text-[#0077B6]">{trip.time}</div>
                   </div>
                 </div>
                 <div className="flex items-center justify-between">
-                  <div className="text-sm text-slate-600">
-                    <span className="font-semibold">{trip.passengers}/{trip.total}</span> seats
+                    <div className="text-sm text-slate-600">
+                    {(() => {
+                      const passengers = typeof trip.passengers === 'number' ? trip.passengers : (typeof trip.soldSeats === 'number' ? trip.soldSeats : (trip.seatsAvailable !== undefined && trip.total ? (trip.total - trip.seatsAvailable) : (trip.totalSeats ? '—' : '—')));
+                      const total = trip.total || trip.totalSeats || '—';
+                      return <span className="font-semibold">{(passengers !== null && passengers !== undefined) ? passengers : '—'}/{total}</span>;
+                    })()} seats
                   </div>
                   <div className="flex gap-1">
-                    {[...Array(5)].map((_, i) => (
-                      <div key={i} className={`w-1.5 h-4 rounded-full ${i < Math.floor((trip.passengers / trip.total) * 5) ? 'bg-[#0077B6]' : 'bg-slate-200'}`}></div>
-                    ))}
+                    {[...Array(5)].map((_, i) => {
+                      const passengers = typeof trip.passengers === 'number' ? trip.passengers : (typeof trip.soldSeats === 'number' ? trip.soldSeats : null);
+                      const total = trip.total || trip.totalSeats || null;
+                      const filled = (passengers !== null && total) ? Math.floor((passengers / total) * 5) : 0;
+                      return <div key={i} className={`w-1.5 h-4 rounded-full ${i < filled ? 'bg-[#0077B6]' : 'bg-slate-200'}`}></div>;
+                    })}
                   </div>
                 </div>
               </div>
@@ -427,7 +472,98 @@ function StatCard({ icon: Icon, label, value, color }) {
 }
 
 // ==================== TRIPS VIEW ====================
-function TripsView() {
+function TripsView({ trips, loading, error }: { trips?: any[], loading?: boolean, error?: string | null }) {
+  const list = (trips && trips.length > 0) ? trips : [];
+
+  const renderEntry = (s: any) => {
+    // If schedule from backend
+    if (s.bus || s.routeFrom || s.departureTime) {
+      const route = s.routeFrom && s.routeTo ? `${s.routeFrom} → ${s.routeTo}` : (s.name || s.route || 'Schedule');
+      const bus = s.bus ? (s.bus.plateNumber || '') : (s.bus_registration || s.bus || '');
+      const departure = s.departureTime ? (new Date(s.departureTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : (s.time || '—');
+      const totalSeats = (s.totalSeats || (s.bus && s.bus.capacity)) || null;
+      const seatsAvailable = (typeof s.seatsAvailable === 'number' ? s.seatsAvailable : (s.available_seats !== undefined ? s.available_seats : null));
+      // Prefer explicit soldSeats from backend; fallback to passengers or compute from capacity - available
+      const passengers = (typeof s.soldSeats === 'number') ? s.soldSeats : (typeof s.passengers === 'number' ? s.passengers : ((totalSeats !== null && seatsAvailable !== null) ? (totalSeats - seatsAvailable) : null));
+      const occupancy = (totalSeats !== null && typeof passengers === 'number' && totalSeats > 0) ? Math.round((passengers / totalSeats) * 100) : null;
+
+      return (
+        <div key={s.id} className="bg-white rounded-2xl border border-slate-200 p-6 hover:shadow-lg transition-all">
+          <div className="flex items-start justify-between mb-4">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-[#0077B6] to-[#00A8E8] flex items-center justify-center shadow-lg">
+                <Bus className="w-7 h-7 text-white" />
+              </div>
+              <div>
+                <div className="text-xl font-black text-slate-900 mb-1">{route}</div>
+                <div className="text-sm text-slate-600">{bus}</div>
+              </div>
+            </div>
+            <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold">{(s.status || s.status === undefined) ? (String(s.status).toUpperCase() || 'UPCOMING') : 'UPCOMING'}</span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <div className="text-center bg-slate-50 rounded-lg p-3">
+              <div className="text-xs text-slate-500 mb-1">Time</div>
+              <div className="font-bold text-slate-900">{departure}</div>
+            </div>
+            <div className="text-center bg-slate-50 rounded-lg p-3">
+              <div className="text-xs text-slate-500 mb-1">Passengers</div>
+              <div className="font-bold text-[#0077B6]">{(passengers !== null && passengers !== undefined) ? passengers : '—'}/{totalSeats || '—'}</div>
+            </div>
+            <div className="text-center bg-slate-50 rounded-lg p-3">
+              <div className="text-xs text-slate-500 mb-1">Occupancy</div>
+              <div className="font-bold text-slate-900">{occupancy !== null ? `${occupancy}%` : '—'}</div>
+            </div>
+          </div>
+
+          <button className="w-full bg-gradient-to-r from-[#27AE60] to-[#229954] text-white py-3 rounded-xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2">
+            <Navigation className="w-5 h-5" />
+            Start Trip
+          </button>
+        </div>
+      );
+    }
+
+    // Fallback (legacy sample)
+    return (
+      <div key={s.id} className="bg-white rounded-2xl border border-slate-200 p-6 hover:shadow-lg transition-all">
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-[#0077B6] to-[#00A8E8] flex items-center justify-center shadow-lg">
+              <Bus className="w-7 h-7 text-white" />
+            </div>
+            <div>
+              <div className="text-xl font-black text-slate-900 mb-1">{s.route}</div>
+              <div className="text-sm text-slate-600">{s.bus}</div>
+            </div>
+          </div>
+          <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold">{s.status || 'UPCOMING'}</span>
+        </div>
+
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="text-center bg-slate-50 rounded-lg p-3">
+            <div className="text-xs text-slate-500 mb-1">Time</div>
+            <div className="font-bold text-slate-900">{s.time}</div>
+          </div>
+          <div className="text-center bg-slate-50 rounded-lg p-3">
+            <div className="text-xs text-slate-500 mb-1">Passengers</div>
+            <div className="font-bold text-[#0077B6]">{s.passengers}/{s.total}</div>
+          </div>
+          <div className="text-center bg-slate-50 rounded-lg p-3">
+            <div className="text-xs text-slate-500 mb-1">Occupancy</div>
+            <div className="font-bold text-slate-900">{Math.round((s.passengers / s.total) * 100)}%</div>
+          </div>
+        </div>
+
+        <button className="w-full bg-gradient-to-r from-[#27AE60] to-[#229954] text-white py-3 rounded-xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2">
+          <Navigation className="w-5 h-5" />
+          Start Trip
+        </button>
+      </div>
+    );
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
@@ -439,42 +575,7 @@ function TripsView() {
       </div>
 
       <div className="space-y-4">
-        {upcomingTrips.map(trip => (
-          <div key={trip.id} className="bg-white rounded-2xl border border-slate-200 p-6 hover:shadow-lg transition-all">
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-[#0077B6] to-[#00A8E8] flex items-center justify-center shadow-lg">
-                  <Bus className="w-7 h-7 text-white" />
-                </div>
-                <div>
-                  <div className="text-xl font-black text-slate-900 mb-1">{trip.route}</div>
-                  <div className="text-sm text-slate-600">{trip.bus}</div>
-                </div>
-              </div>
-              <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold">UPCOMING</span>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <div className="text-center bg-slate-50 rounded-lg p-3">
-                <div className="text-xs text-slate-500 mb-1">Time</div>
-                <div className="font-bold text-slate-900">{trip.time}</div>
-              </div>
-              <div className="text-center bg-slate-50 rounded-lg p-3">
-                <div className="text-xs text-slate-500 mb-1">Passengers</div>
-                <div className="font-bold text-[#0077B6]">{trip.passengers}/{trip.total}</div>
-              </div>
-              <div className="text-center bg-slate-50 rounded-lg p-3">
-                <div className="text-xs text-slate-500 mb-1">Occupancy</div>
-                <div className="font-bold text-slate-900">{Math.round((trip.passengers / trip.total) * 100)}%</div>
-              </div>
-            </div>
-
-            <button className="w-full bg-gradient-to-r from-[#27AE60] to-[#229954] text-white py-3 rounded-xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2">
-              <Navigation className="w-5 h-5" />
-              Start Trip
-            </button>
-          </div>
-        ))}
+        {list.map(item => renderEntry(item))}
       </div>
     </div>
   );

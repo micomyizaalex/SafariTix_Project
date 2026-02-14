@@ -61,16 +61,241 @@ const getAssignedBus = async (req, res) => {
 const getTodaySchedule = async (req, res) => {
 	try {
 		const user = await User.findByPk(req.userId);
-		const bus = await Bus.findOne({ where: { driver_id: req.userId, company_id: user.company_id } });
-		if (!bus) return res.json({ schedules: [] });
+		if (!user) return res.status(404).json({ error: 'User not found' });
+		const companyId = user.company_id;
 
+		// Determine possible driver ids in assignments: canonical user id and legacy driver id (if linked)
+		const legacyDriver = await Driver.findOne({ where: { user_id: req.userId } });
+		const driverIdCandidates = [req.userId];
+		if (legacyDriver && legacyDriver.id) driverIdCandidates.push(legacyDriver.id);
+
+		// Find active assignments for this driver within the company
+		const assignments = await require('../models').DriverAssignment.findAll({
+			where: {
+				driver_id: { [Op.in]: driverIdCandidates },
+				unassigned_at: null,
+				company_id: companyId
+			},
+			attributes: ['bus_id']
+		});
+
+		const busIds = assignments.map(a => a.bus_id).filter(Boolean);
+		if (!busIds || busIds.length === 0) return res.json({ schedules: [] });
+
+		// Build date window for today
 		const today = new Date();
 		today.setHours(0,0,0,0);
 		const tomorrow = new Date(today);
 		tomorrow.setDate(tomorrow.getDate()+1);
 
-		const schedules = await Schedule.findAll({ where: { bus_id: bus.id, schedule_date: { [Op.gte]: today, [Op.lt]: tomorrow } } });
-		res.json({ schedules });
+		// Fetch schedules for assigned buses (today) with related bus and route info
+		const schedules = await Schedule.findAll({
+			where: {
+				bus_id: { [Op.in]: busIds },
+				company_id: companyId,
+				schedule_date: { [Op.gte]: today, [Op.lt]: tomorrow },
+				status: { [Op.in]: ['scheduled', 'in_progress'] }
+			},
+			include: [
+				{ model: Bus, attributes: ['id','plate_number','model','capacity'] },
+				{ model: require('../models').Route, attributes: ['id','origin','destination'] }
+			],
+			order: [['departure_time','ASC']],
+		});
+
+		// Map to clean JSON structure
+		const mapped = schedules.map(s => ({
+			id: s.id,
+			bus: s.Bus ? { id: s.Bus.id, plateNumber: s.Bus.plate_number, model: s.Bus.model, capacity: s.Bus.capacity } : null,
+			routeFrom: s.Route ? s.Route.origin : null,
+			routeTo: s.Route ? s.Route.destination : null,
+			departureTime: s.departure_time,
+			arrivalTime: s.arrival_time,
+			date: s.schedule_date,
+			seatsAvailable: s.available_seats,
+			totalSeats: s.Bus ? s.Bus.capacity : null,
+			price: s.price_per_seat,
+			status: s.status
+		}));
+
+		// Ensure uniqueness (just in case) by schedule id
+		const unique = [];
+		const seen = new Set();
+		for (const it of mapped) {
+			if (!seen.has(String(it.id))) { seen.add(String(it.id)); unique.push(it); }
+		}
+
+		res.json({ schedules: unique });
+	} catch (err) {
+		res.status(400).json({ error: err.message });
+	}
+};
+
+// Return all schedules for buses currently assigned to the logged-in driver
+const getMyTrips = async (req, res) => {
+	try {
+		const user = await User.findByPk(req.userId);
+		if (!user) return res.status(404).json({ error: 'User not found' });
+		const companyId = user.company_id;
+
+		const legacyDriver = await Driver.findOne({ where: { user_id: req.userId } });
+		const driverIdCandidates = [req.userId];
+		if (legacyDriver && legacyDriver.id) driverIdCandidates.push(legacyDriver.id);
+
+		const assignments = await require('../models').DriverAssignment.findAll({
+			where: {
+				driver_id: { [Op.in]: driverIdCandidates },
+				unassigned_at: null,
+				company_id: companyId
+			},
+			attributes: ['bus_id']
+		});
+
+		const busIds = assignments.map(a => a.bus_id).filter(Boolean);
+		if (!busIds || busIds.length === 0) return res.json({ trips: [] });
+
+		const schedules = await Schedule.findAll({
+			where: {
+				bus_id: { [Op.in]: busIds },
+				company_id: companyId,
+			},
+			include: [
+				{ model: Bus, attributes: ['id','plate_number','model','capacity'] },
+				{ model: require('../models').Route, attributes: ['id','origin','destination'] }
+			],
+			order: [['schedule_date','ASC'], ['departure_time','ASC']],
+		});
+
+		const mapped = schedules.map(s => ({
+			id: s.id,
+			bus: s.Bus ? { id: s.Bus.id, plateNumber: s.Bus.plate_number, model: s.Bus.model, capacity: s.Bus.capacity } : null,
+			routeFrom: s.Route ? s.Route.origin : null,
+			routeTo: s.Route ? s.Route.destination : null,
+			departureTime: s.departure_time,
+			arrivalTime: s.arrival_time,
+			date: s.schedule_date,
+			seatsAvailable: s.available_seats,
+			totalSeats: s.Bus ? s.Bus.capacity : null,
+			price: s.price_per_seat,
+			status: s.status
+		}));
+
+		res.json({ trips: mapped });
+	} catch (err) {
+		res.status(400).json({ error: err.message });
+	}
+};
+
+// Aggregated dashboard data for driver: today's stats, upcoming trips, recent check-ins
+const getDashboard = async (req, res) => {
+	try {
+		const user = await User.findByPk(req.userId);
+		if (!user) return res.status(404).json({ error: 'User not found' });
+		const companyId = user.company_id;
+
+		const legacyDriver = await Driver.findOne({ where: { user_id: req.userId } });
+		const driverIdCandidates = [req.userId];
+		if (legacyDriver && legacyDriver.id) driverIdCandidates.push(legacyDriver.id);
+
+		const assignments = await require('../models').DriverAssignment.findAll({
+			where: {
+				driver_id: { [Op.in]: driverIdCandidates },
+				unassigned_at: null,
+				company_id: companyId
+			},
+			attributes: ['bus_id']
+		});
+
+		const busIds = assignments.map(a => a.bus_id).filter(Boolean);
+		if (!busIds || busIds.length === 0) return res.json({ stats: { completed: 0, active: 0, passengers: 0, revenue: 0 }, upcoming: [], recentCheckins: [] });
+
+		// Date window for today
+		const today = new Date();
+		today.setHours(0,0,0,0);
+		const tomorrow = new Date(today);
+		tomorrow.setDate(tomorrow.getDate()+1);
+
+		// Use raw SQL for aggregations
+		const client = await pool.connect();
+		try {
+			// Stats: completed and active schedules for today
+			const statsQ = await client.query(
+				`SELECT
+					 SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS completed,
+					 SUM(CASE WHEN s.status = 'in_progress' THEN 1 ELSE 0 END) AS active
+				 FROM schedules s
+				 WHERE s.bus_id = ANY($1::int[]) AND s.company_id = $2 AND s.schedule_date >= $3 AND s.schedule_date < $4`,
+				[busIds, companyId, today, tomorrow]
+			);
+
+			const statsRow = statsQ.rows[0] || { completed: 0, active: 0 };
+
+			// Tickets: passengers sold and revenue for today (tickets linked to today's schedules)
+			const ticketsQ = await client.query(
+				`SELECT COUNT(*) AS passengers, COALESCE(SUM(CASE WHEN t.price IS NOT NULL THEN t.price::numeric ELSE 0 END),0) AS revenue
+				 FROM tickets t
+				 INNER JOIN schedules s ON t.schedule_id = s.id
+				 WHERE s.bus_id = ANY($1::int[]) AND s.company_id = $2 AND s.schedule_date >= $3 AND s.schedule_date < $4
+					 AND t.status IN ('booked','paid','checked_in')`,
+				[busIds, companyId, today, tomorrow]
+			);
+
+			const ticketsRow = ticketsQ.rows[0] || { passengers: 0, revenue: 0 };
+
+			// Upcoming trips (next 5 schedules from now)
+			const upcomingQ = await client.query(
+				`SELECT s.id, s.departure_time, s.arrival_time, s.schedule_date, s.available_seats, s.price_per_seat, s.status,
+								b.id AS bus_id, b.plate_number AS bus_plate, b.capacity AS bus_capacity,
+								r.origin AS route_from, r.destination AS route_to
+				 FROM schedules s
+				 LEFT JOIN buses b ON s.bus_id = b.id
+				 LEFT JOIN routes r ON s.route_id = r.id
+				 WHERE s.bus_id = ANY($1::int[]) AND s.company_id = $2 AND (s.schedule_date > $3 OR (s.schedule_date = $3 AND s.departure_time >= NOW()::time))
+				 ORDER BY s.schedule_date ASC, s.departure_time ASC
+				 LIMIT 5`,
+				[busIds, companyId, today]
+			);
+
+			const upcoming = upcomingQ.rows.map(r => ({
+				id: r.id,
+				routeFrom: r.route_from,
+				routeTo: r.route_to,
+				departureTime: r.departure_time,
+				arrivalTime: r.arrival_time,
+				date: r.schedule_date,
+				seatsAvailable: r.available_seats,
+				totalSeats: r.bus_capacity,
+				price: r.price_per_seat,
+				status: r.status,
+				bus: { id: r.bus_id, plateNumber: r.bus_plate, capacity: r.bus_capacity }
+			}));
+
+			// Recent check-ins (last 5) for assigned buses
+			const recentQ = await client.query(
+				`SELECT t.id, t.seat_number, t.checked_in_at, u.full_name AS passenger_name, s.id AS schedule_id, b.plate_number AS bus_plate
+				 FROM tickets t
+				 INNER JOIN users u ON t.passenger_id = u.id
+				 INNER JOIN schedules s ON t.schedule_id = s.id
+				 LEFT JOIN buses b ON s.bus_id = b.id
+				 WHERE s.bus_id = ANY($1::int[]) AND s.company_id = $2 AND t.status = 'checked_in'
+				 ORDER BY t.checked_in_at DESC
+				 LIMIT 5`,
+				[busIds, companyId]
+			);
+
+			const recent = recentQ.rows.map(r => ({ id: r.id, name: r.passenger_name, seat: r.seat_number, checkedAt: r.checked_in_at, busPlate: r.bus_plate }));
+
+			const stats = {
+				completed: parseInt(statsRow.completed || 0, 10),
+				active: parseInt(statsRow.active || 0, 10),
+				passengers: parseInt(ticketsRow.passengers || 0, 10),
+				revenue: parseFloat(ticketsRow.revenue || 0)
+			};
+
+			res.json({ stats, upcoming, recentCheckins: recent });
+		} finally {
+			client.release();
+		}
 	} catch (err) {
 		res.status(400).json({ error: err.message });
 	}
@@ -134,7 +359,9 @@ const getDriverContext = async (req, res) => {
 		const driver = await Driver.findOne({ where: { user_id: req.userId } });
 
 		if (!driver) {
-			return res.status(404).json({ error: 'Driver profile not found', message: 'No driver linked to this account' });
+			console.warn('getDriverContext: no legacy driver linked to user', { userId: req.userId });
+			// Return empty structure to frontend instead of 404 so UI can gracefully handle canonical-only drivers
+			return res.json({ driver: null, buses: [] });
 		}
 
 		const client = await pool.connect();
@@ -353,4 +580,6 @@ module.exports = {
 	getDriverContext,
 	scanTicket,
 	shareLocation,
+	getMyTrips,
+	getDashboard,
 };
