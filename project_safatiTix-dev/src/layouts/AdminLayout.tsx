@@ -1,6 +1,5 @@
 import React, { CSSProperties } from 'react';
 import { Outlet } from 'react-router-dom';
-import { Header } from '../pages/public/header';
 
 const SAFARITIX = { primary: '#0077B6' };
 
@@ -12,7 +11,6 @@ export default function AdminLayout() {
 
   return (
     <div style={styles.wrapper}>
-      <Header />
       <main style={styles.main}>
         <Outlet />
       </main>
