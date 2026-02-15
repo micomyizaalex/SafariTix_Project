@@ -358,7 +358,17 @@ export default function AdminDashboard() {
           {activeModule === 'buses' && <BusManagement buses={buses} />}
           {activeModule === 'tickets' && <TicketManagement tickets={recentTickets} />}
           {activeModule === 'tracking' && <LiveTracking />}
-          {activeModule === 'analytics' && <Analytics />}
+          {activeModule === 'analytics' && (
+            <Analytics
+              stats={dashboardStats}
+              companies={companies}
+              users={users}
+              buses={buses}
+              tickets={recentTickets}
+              revenueData={revenueData}
+              subscriptionData={subscriptionData}
+            />
+          )}
           {activeModule === 'settings' && <SettingsView />}
         </main>
       </div>
@@ -1758,18 +1768,802 @@ function LiveTracking() {
 }
 
 // ==================== ANALYTICS ====================
-function Analytics() {
+interface AnalyticsProps {
+  stats: any;
+  companies: any[];
+  users: any[];
+  buses: any[];
+  tickets: any[];
+  revenueData: any[];
+  subscriptionData: any[];
+}
+
+function Analytics({ stats, companies, users, buses, tickets, revenueData, subscriptionData }: AnalyticsProps) {
+  const [activeTab, setActiveTab] = useState('overview');
+
+  // ---- Derived data computations ----
+
+  // Ticket status distribution
+  const ticketStatusCounts = tickets.reduce((acc: any, t: any) => {
+    const status = t.status || 'UNKNOWN';
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
+  const ticketStatusData = Object.entries(ticketStatusCounts).map(([name, value]) => ({
+    name: name.replace(/_/g, ' '),
+    value: value as number,
+    color: name === 'CONFIRMED' ? COLORS.success : name === 'CHECKED_IN' ? COLORS.primary : name === 'CANCELLED' ? COLORS.danger : name === 'PENDING_PAYMENT' ? COLORS.secondary : '#94a3b8',
+  }));
+
+  // User role distribution
+  const roleCounts = users.reduce((acc: any, u: any) => {
+    acc[u.role] = (acc[u.role] || 0) + 1;
+    return acc;
+  }, {});
+  const userRoleData = Object.entries(roleCounts).map(([name, value]) => ({
+    name: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+    value: value as number,
+    color: name === 'commuter' ? COLORS.primary : name === 'company_admin' ? COLORS.secondary : name === 'driver' ? COLORS.success : name === 'admin' ? COLORS.danger : '#94a3b8',
+  }));
+
+  // Company status distribution
+  const companyStatusCounts = companies.reduce((acc: any, c: any) => {
+    const status = c.status === 'active' ? 'Active' : c.status === 'pending' ? 'Pending' : c.status === 'suspended' ? 'Suspended' : c.status;
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
+  const companyStatusData = Object.entries(companyStatusCounts).map(([name, value]) => ({
+    name,
+    value: value as number,
+    color: name === 'Active' ? COLORS.success : name === 'Pending' ? COLORS.secondary : name === 'Suspended' ? COLORS.danger : '#94a3b8',
+  }));
+
+  // Bus status distribution
+  const busStatusCounts = buses.reduce((acc: any, b: any) => {
+    const status = (b.status || 'UNKNOWN').toUpperCase();
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
+  const busStatusData = Object.entries(busStatusCounts).map(([name, value]) => ({
+    name: name.charAt(0) + name.slice(1).toLowerCase(),
+    value: value as number,
+    color: name === 'ACTIVE' ? COLORS.success : name === 'INACTIVE' ? '#94a3b8' : COLORS.secondary,
+  }));
+
+  // Top routes by ticket count
+  const routeTicketCounts = tickets.reduce((acc: any, t: any) => {
+    const route = t.route || 'Unknown';
+    if (!acc[route]) acc[route] = { count: 0, revenue: 0 };
+    acc[route].count += 1;
+    acc[route].revenue += parseFloat(t.price) || 0;
+    return acc;
+  }, {});
+  const topRoutes = Object.entries(routeTicketCounts)
+    .map(([route, data]: [string, any]) => ({ route, tickets: data.count, revenue: data.revenue }))
+    .sort((a, b) => b.tickets - a.tickets)
+    .slice(0, 8);
+
+  // Company revenue ranking for bar chart
+  const companyRevenueData = companies
+    .filter(c => c.revenue > 0)
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 6)
+    .map(c => ({ name: c.name.length > 15 ? c.name.slice(0, 15) + '...' : c.name, revenue: c.revenue, tickets: c.tickets }));
+
+  // Daily ticket volume (last 30 days from ticket data)
+  const dailyTickets = tickets.reduce((acc: any, t: any) => {
+    if (!t.date) return acc;
+    const day = new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    acc[day] = (acc[day] || 0) + 1;
+    return acc;
+  }, {});
+  const dailyTicketData = Object.entries(dailyTickets)
+    .map(([day, count]) => ({ day, tickets: count as number }))
+    .slice(-14);
+
+  // Revenue data enriched with ticket count
+  const enrichedRevenue = revenueData.map((r: any) => ({
+    month: r.month,
+    revenue: parseFloat(r.revenue) || 0,
+    tickets: parseInt(r.tickets) || 0,
+  }));
+
+  // Bus capacity distribution
+  const capacityCounts = buses.reduce((acc: any, b: any) => {
+    const cap = `${b.capacity}-seat`;
+    acc[cap] = (acc[cap] || 0) + 1;
+    return acc;
+  }, {});
+  const capacityData = Object.entries(capacityCounts).map(([name, value]) => ({
+    name,
+    value: value as number,
+    color: name === '25-seat' ? COLORS.primary : name === '30-seat' ? COLORS.secondary : COLORS.success,
+  }));
+
+  // Summary KPIs
+  const totalRevenue = stats.totalRevenue || 0;
+  const avgTicketPrice = tickets.length > 0 ? tickets.reduce((s: number, t: any) => s + (parseFloat(t.price) || 0), 0) / tickets.length : 0;
+  const confirmedRate = tickets.length > 0 ? ((ticketStatusCounts['CONFIRMED'] || 0) + (ticketStatusCounts['CHECKED_IN'] || 0)) / tickets.length * 100 : 0;
+  const avgBusCapacity = buses.length > 0 ? buses.reduce((s: number, b: any) => s + (b.capacity || 0), 0) / buses.length : 0;
+
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'revenue', label: 'Revenue' },
+    { id: 'tickets', label: 'Tickets' },
+    { id: 'users', label: 'Users & Companies' },
+    { id: 'fleet', label: 'Fleet & Routes' },
+  ];
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <h1 className="text-2xl lg:text-3xl font-black font-['Montserrat'] text-[#2B2D42]">Advanced Analytics</h1>
-      
-      <div className="bg-white rounded-2xl p-8 border border-gray-200">
-        <div className="text-center py-12">
-          <BarChart3 className="w-16 h-16 text-[#0077B6] mx-auto mb-4" />
-          <h3 className="text-xl font-bold text-gray-900 mb-2">Analytics Dashboard</h3>
-          <p className="text-gray-600">Advanced analytics and reports coming soon</p>
+      {/* Header */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl lg:text-3xl font-black font-['Montserrat'] text-[#2B2D42] mb-2">
+            Advanced Analytics
+          </h1>
+          <p className="text-gray-600">Insights and performance metrics across the platform</p>
         </div>
       </div>
+
+      {/* Tabs */}
+      <div className="bg-white rounded-xl p-1.5 border border-gray-200 flex items-center gap-1 overflow-x-auto">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-5 py-2.5 rounded-lg font-semibold text-sm transition-all whitespace-nowrap ${
+              activeTab === tab.id
+                ? 'bg-gradient-to-r from-[#0077B6] to-[#005F8E] text-white shadow-lg'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ===== OVERVIEW TAB ===== */}
+      {activeTab === 'overview' && (
+        <div className="space-y-6">
+          {/* KPI Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl bg-[#0077B6]/10 flex items-center justify-center">
+                  <DollarSign className="w-5 h-5 text-[#0077B6]" />
+                </div>
+                <span className="text-sm text-gray-600 font-medium">Total Revenue</span>
+              </div>
+              <div className="text-2xl font-black text-[#2B2D42]">
+                RWF {totalRevenue >= 1000000 ? `${(totalRevenue / 1000000).toFixed(1)}M` : totalRevenue.toLocaleString()}
+              </div>
+              <div className="flex items-center gap-1 mt-2 text-xs font-bold text-green-600">
+                <ArrowUp className="w-3 h-3" />
+                +{stats.growth?.revenue || 0}% vs last period
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl bg-[#F4A261]/10 flex items-center justify-center">
+                  <Ticket className="w-5 h-5 text-[#F4A261]" />
+                </div>
+                <span className="text-sm text-gray-600 font-medium">Avg. Ticket Price</span>
+              </div>
+              <div className="text-2xl font-black text-[#2B2D42]">
+                RWF {avgTicketPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </div>
+              <div className="text-xs text-gray-500 mt-2">{tickets.length} total tickets</div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl bg-[#27AE60]/10 flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5 text-[#27AE60]" />
+                </div>
+                <span className="text-sm text-gray-600 font-medium">Confirmation Rate</span>
+              </div>
+              <div className="text-2xl font-black text-[#2B2D42]">
+                {confirmedRate.toFixed(1)}%
+              </div>
+              <div className="text-xs text-gray-500 mt-2">Confirmed + checked in</div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl bg-[#E63946]/10 flex items-center justify-center">
+                  <Bus className="w-5 h-5 text-[#E63946]" />
+                </div>
+                <span className="text-sm text-gray-600 font-medium">Avg. Bus Capacity</span>
+              </div>
+              <div className="text-2xl font-black text-[#2B2D42]">
+                {avgBusCapacity.toFixed(0)} seats
+              </div>
+              <div className="text-xs text-gray-500 mt-2">{buses.length} total buses</div>
+            </div>
+          </div>
+
+          {/* Revenue Trend + Ticket Status */}
+          <div className="grid lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Revenue & Tickets Trend</h3>
+              <p className="text-sm text-gray-500 mb-6">Monthly performance over the last 6 months</p>
+              {enrichedRevenue.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={enrichedRevenue}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="month" stroke="#94a3b8" style={{ fontSize: '12px' }} />
+                    <YAxis yAxisId="left" stroke="#94a3b8" style={{ fontSize: '12px' }} />
+                    <YAxis yAxisId="right" orientation="right" stroke="#94a3b8" style={{ fontSize: '12px' }} />
+                    <Tooltip
+                      formatter={(value: any, name: string) =>
+                        name === 'Revenue (RWF)' ? [`RWF ${Number(value).toLocaleString()}`, 'Revenue'] : [value, 'Tickets']
+                      }
+                    />
+                    <Legend />
+                    <Bar yAxisId="left" dataKey="revenue" fill={COLORS.primary} name="Revenue (RWF)" radius={[4, 4, 0, 0]} />
+                    <Line yAxisId="right" type="monotone" dataKey="tickets" stroke={COLORS.secondary} strokeWidth={3} name="Tickets" dot={{ fill: COLORS.secondary, r: 5 }} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-[300px] flex items-center justify-center text-gray-400">
+                  <p>No revenue data available yet</p>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Ticket Status</h3>
+              <p className="text-sm text-gray-500 mb-6">Distribution by status</p>
+              {ticketStatusData.length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <RechartsPie>
+                      <Pie data={ticketStatusData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
+                        {ticketStatusData.map((entry, i) => (
+                          <Cell key={i} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value: any, name: string) => [value, name]} />
+                    </RechartsPie>
+                  </ResponsiveContainer>
+                  <div className="mt-4 space-y-2">
+                    {ticketStatusData.map((item, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                          <span className="text-gray-600 capitalize">{item.name}</span>
+                        </div>
+                        <span className="font-bold text-gray-900">{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="h-[200px] flex items-center justify-center text-gray-400">No ticket data</div>
+              )}
+            </div>
+          </div>
+
+          {/* User Role + Top Routes */}
+          <div className="grid lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">User Distribution</h3>
+              <p className="text-sm text-gray-500 mb-6">Users by role</p>
+              {userRoleData.length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <RechartsPie>
+                      <Pie data={userRoleData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
+                        {userRoleData.map((entry, i) => (
+                          <Cell key={i} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </RechartsPie>
+                  </ResponsiveContainer>
+                  <div className="mt-4 space-y-2">
+                    {userRoleData.map((item, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                          <span className="text-gray-600">{item.name}</span>
+                        </div>
+                        <span className="font-bold text-gray-900">{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="h-[200px] flex items-center justify-center text-gray-400">No user data</div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Top Routes</h3>
+              <p className="text-sm text-gray-500 mb-6">By ticket volume</p>
+              {topRoutes.length > 0 ? (
+                <div className="space-y-3">
+                  {topRoutes.slice(0, 5).map((route, i) => {
+                    const maxTickets = topRoutes[0].tickets;
+                    return (
+                      <div key={i}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-semibold text-gray-700 truncate max-w-[60%]">{route.route}</span>
+                          <div className="flex items-center gap-3 text-sm">
+                            <span className="text-gray-500">{route.tickets} tickets</span>
+                            <span className="font-bold text-[#27AE60]">RWF {route.revenue.toLocaleString()}</span>
+                          </div>
+                        </div>
+                        <div className="w-full bg-gray-100 rounded-full h-2">
+                          <div
+                            className="h-2 rounded-full bg-gradient-to-r from-[#0077B6] to-[#005F8E]"
+                            style={{ width: `${(route.tickets / maxTickets) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="h-[200px] flex items-center justify-center text-gray-400">No route data</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== REVENUE TAB ===== */}
+      {activeTab === 'revenue' && (
+        <div className="space-y-6">
+          {/* Revenue KPIs */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Total Revenue</div>
+              <div className="text-2xl font-black text-[#2B2D42]">
+                RWF {totalRevenue >= 1000000 ? `${(totalRevenue / 1000000).toFixed(1)}M` : totalRevenue.toLocaleString()}
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">This Month</div>
+              <div className="text-2xl font-black text-[#27AE60]">
+                RWF {enrichedRevenue.length > 0 ? (enrichedRevenue[enrichedRevenue.length - 1].revenue >= 1000000 ? `${(enrichedRevenue[enrichedRevenue.length - 1].revenue / 1000000).toFixed(1)}M` : enrichedRevenue[enrichedRevenue.length - 1].revenue.toLocaleString()) : '0'}
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Avg. Monthly Revenue</div>
+              <div className="text-2xl font-black text-[#0077B6]">
+                RWF {enrichedRevenue.length > 0 ? (enrichedRevenue.reduce((s: number, r: any) => s + r.revenue, 0) / enrichedRevenue.length).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '0'}
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Revenue per Ticket</div>
+              <div className="text-2xl font-black text-[#F4A261]">
+                RWF {avgTicketPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </div>
+            </div>
+          </div>
+
+          {/* Revenue Area Chart */}
+          <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+            <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Revenue Over Time</h3>
+            <p className="text-sm text-gray-500 mb-6">Monthly revenue trend</p>
+            {enrichedRevenue.length > 0 ? (
+              <ResponsiveContainer width="100%" height={350}>
+                <AreaChart data={enrichedRevenue}>
+                  <defs>
+                    <linearGradient id="colorAnalyticsRevenue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={COLORS.primary} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={COLORS.primary} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="month" stroke="#94a3b8" style={{ fontSize: '12px' }} />
+                  <YAxis stroke="#94a3b8" style={{ fontSize: '12px' }} />
+                  <Tooltip formatter={(value: any) => [`RWF ${Number(value).toLocaleString()}`, 'Revenue']} />
+                  <Area type="monotone" dataKey="revenue" stroke={COLORS.primary} strokeWidth={3} fill="url(#colorAnalyticsRevenue)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-[350px] flex items-center justify-center text-gray-400">No revenue data available</div>
+            )}
+          </div>
+
+          {/* Revenue by Company */}
+          <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+            <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Revenue by Company</h3>
+            <p className="text-sm text-gray-500 mb-6">Top performing companies</p>
+            {companyRevenueData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={companyRevenueData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis type="number" stroke="#94a3b8" style={{ fontSize: '12px' }} />
+                  <YAxis dataKey="name" type="category" stroke="#94a3b8" style={{ fontSize: '12px' }} width={130} />
+                  <Tooltip formatter={(value: any) => [`RWF ${Number(value).toLocaleString()}`, 'Revenue']} />
+                  <Bar dataKey="revenue" fill={COLORS.primary} radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-[300px] flex items-center justify-center text-gray-400">No company revenue data</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ===== TICKETS TAB ===== */}
+      {activeTab === 'tickets' && (
+        <div className="space-y-6">
+          {/* Ticket KPIs */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Total Tickets</div>
+              <div className="text-2xl font-black text-[#2B2D42]">{tickets.length}</div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Confirmed</div>
+              <div className="text-2xl font-black text-[#27AE60]">{ticketStatusCounts['CONFIRMED'] || 0}</div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Cancelled</div>
+              <div className="text-2xl font-black text-[#E63946]">{ticketStatusCounts['CANCELLED'] || 0}</div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Today</div>
+              <div className="text-2xl font-black text-[#0077B6]">{stats.ticketsToday || 0}</div>
+            </div>
+          </div>
+
+          {/* Ticket Volume + Status Chart */}
+          <div className="grid lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Daily Ticket Volume</h3>
+              <p className="text-sm text-gray-500 mb-6">Recent booking activity</p>
+              {dailyTicketData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={dailyTicketData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="day" stroke="#94a3b8" style={{ fontSize: '11px' }} angle={-30} textAnchor="end" height={60} />
+                    <YAxis stroke="#94a3b8" style={{ fontSize: '12px' }} allowDecimals={false} />
+                    <Tooltip />
+                    <Bar dataKey="tickets" fill={COLORS.primary} radius={[4, 4, 0, 0]} name="Tickets" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-[300px] flex items-center justify-center text-gray-400">No daily ticket data</div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Ticket Status Breakdown</h3>
+              <p className="text-sm text-gray-500 mb-6">Current distribution</p>
+              {ticketStatusData.length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <RechartsPie>
+                      <Pie data={ticketStatusData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={4} dataKey="value">
+                        {ticketStatusData.map((entry, i) => (
+                          <Cell key={i} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </RechartsPie>
+                  </ResponsiveContainer>
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    {ticketStatusData.map((item, i) => (
+                      <div key={i} className="flex items-center gap-2 text-sm">
+                        <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
+                        <span className="text-gray-600 truncate">{item.name}</span>
+                        <span className="font-bold text-gray-900 ml-auto">{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="h-[300px] flex items-center justify-center text-gray-400">No data</div>
+              )}
+            </div>
+          </div>
+
+          {/* Top Routes Table */}
+          <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+            <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Route Performance</h3>
+            <p className="text-sm text-gray-500 mb-6">Ranked by ticket sales</p>
+            {topRoutes.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase">#</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase">Route</th>
+                      <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">Tickets</th>
+                      <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">Revenue</th>
+                      <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase">Avg. Price</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {topRoutes.map((route, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm font-bold text-gray-400">{i + 1}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <Navigation className="w-4 h-4 text-[#0077B6]" />
+                            <span className="text-sm font-semibold text-gray-900">{route.route}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">{route.tickets}</td>
+                        <td className="px-4 py-3 text-right text-sm font-bold text-[#27AE60]">RWF {route.revenue.toLocaleString()}</td>
+                        <td className="px-4 py-3 text-right text-sm text-gray-600">RWF {route.tickets > 0 ? (route.revenue / route.tickets).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '0'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="py-8 text-center text-gray-400">No route data available</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ===== USERS & COMPANIES TAB ===== */}
+      {activeTab === 'users' && (
+        <div className="space-y-6">
+          {/* User KPIs */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Total Users</div>
+              <div className="text-2xl font-black text-[#2B2D42]">{users.length}</div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Commuters</div>
+              <div className="text-2xl font-black text-[#0077B6]">{roleCounts['commuter'] || 0}</div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Companies</div>
+              <div className="text-2xl font-black text-[#F4A261]">{companies.length}</div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Drivers</div>
+              <div className="text-2xl font-black text-[#27AE60]">{roleCounts['driver'] || 0}</div>
+            </div>
+          </div>
+
+          {/* User Role + Subscription Plan Charts */}
+          <div className="grid lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">User Role Distribution</h3>
+              <p className="text-sm text-gray-500 mb-6">Breakdown across roles</p>
+              {userRoleData.length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <RechartsPie>
+                      <Pie data={userRoleData} cx="50%" cy="50%" innerRadius={60} outerRadius={95} paddingAngle={4} dataKey="value">
+                        {userRoleData.map((entry, i) => (
+                          <Cell key={i} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </RechartsPie>
+                  </ResponsiveContainer>
+                  <div className="mt-4 space-y-2">
+                    {userRoleData.map((item, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                          <span className="text-gray-600">{item.name}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-bold text-gray-900">{item.value}</span>
+                          <span className="text-gray-400 text-xs">({users.length > 0 ? ((item.value / users.length) * 100).toFixed(0) : 0}%)</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="h-[250px] flex items-center justify-center text-gray-400">No user data</div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Subscription Plans</h3>
+              <p className="text-sm text-gray-500 mb-6">Company plan distribution</p>
+              {subscriptionData.filter(s => s.value > 0).length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <RechartsPie>
+                      <Pie data={subscriptionData.filter(s => s.value > 0)} cx="50%" cy="50%" innerRadius={60} outerRadius={95} paddingAngle={4} dataKey="value">
+                        {subscriptionData.filter(s => s.value > 0).map((entry, i) => (
+                          <Cell key={i} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </RechartsPie>
+                  </ResponsiveContainer>
+                  <div className="mt-4 space-y-2">
+                    {subscriptionData.filter(s => s.value > 0).map((item, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                          <span className="text-gray-600">{item.name}</span>
+                        </div>
+                        <span className="font-bold text-gray-900">{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="h-[250px] flex items-center justify-center text-gray-400">No subscription data</div>
+              )}
+            </div>
+          </div>
+
+          {/* Company Status + Top Companies */}
+          <div className="grid lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Company Status</h3>
+              <p className="text-sm text-gray-500 mb-6">Active vs pending vs suspended</p>
+              {companyStatusData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={companyStatusData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="name" stroke="#94a3b8" style={{ fontSize: '12px' }} />
+                    <YAxis stroke="#94a3b8" style={{ fontSize: '12px' }} allowDecimals={false} />
+                    <Tooltip />
+                    <Bar dataKey="value" name="Companies" radius={[4, 4, 0, 0]}>
+                      {companyStatusData.map((entry, i) => (
+                        <Cell key={i} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-[250px] flex items-center justify-center text-gray-400">No company data</div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Top Companies by Revenue</h3>
+              <p className="text-sm text-gray-500 mb-6">Highest earning companies</p>
+              {companies.filter(c => c.revenue > 0).length > 0 ? (
+                <div className="space-y-3">
+                  {companies.filter(c => c.revenue > 0).slice(0, 5).map((c, i) => (
+                    <div key={i} className="flex items-center gap-4 p-3 bg-gray-50 rounded-xl">
+                      <div className="w-8 h-8 bg-gradient-to-br from-[#0077B6] to-[#005F8E] rounded-lg flex items-center justify-center text-white text-xs font-bold">
+                        {i + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-sm text-gray-900 truncate">{c.name}</div>
+                        <div className="text-xs text-gray-500">{c.buses} buses · {c.tickets} tickets</div>
+                      </div>
+                      <div className="text-sm font-bold text-[#27AE60] whitespace-nowrap">
+                        RWF {c.revenue >= 1000000 ? `${(c.revenue / 1000000).toFixed(1)}M` : c.revenue.toLocaleString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="h-[250px] flex items-center justify-center text-gray-400">No revenue data</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== FLEET & ROUTES TAB ===== */}
+      {activeTab === 'fleet' && (
+        <div className="space-y-6">
+          {/* Fleet KPIs */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Total Buses</div>
+              <div className="text-2xl font-black text-[#2B2D42]">{buses.length}</div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Active Buses</div>
+              <div className="text-2xl font-black text-[#27AE60]">{busStatusCounts['ACTIVE'] || 0}</div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Total Seat Capacity</div>
+              <div className="text-2xl font-black text-[#0077B6]">{buses.reduce((s: number, b: any) => s + (b.capacity || 0), 0).toLocaleString()}</div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-600 mb-1">Active Routes</div>
+              <div className="text-2xl font-black text-[#F4A261]">{topRoutes.length}</div>
+            </div>
+          </div>
+
+          {/* Bus Status + Capacity Distribution */}
+          <div className="grid lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Bus Status</h3>
+              <p className="text-sm text-gray-500 mb-6">Fleet availability</p>
+              {busStatusData.length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <RechartsPie>
+                      <Pie data={busStatusData} cx="50%" cy="50%" innerRadius={60} outerRadius={95} paddingAngle={4} dataKey="value">
+                        {busStatusData.map((entry, i) => (
+                          <Cell key={i} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </RechartsPie>
+                  </ResponsiveContainer>
+                  <div className="mt-4 space-y-2">
+                    {busStatusData.map((item, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                          <span className="text-gray-600">{item.name}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-bold text-gray-900">{item.value}</span>
+                          <span className="text-gray-400 text-xs">({buses.length > 0 ? ((item.value / buses.length) * 100).toFixed(0) : 0}%)</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="h-[250px] flex items-center justify-center text-gray-400">No bus data</div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Capacity Distribution</h3>
+              <p className="text-sm text-gray-500 mb-6">Buses by seat layout</p>
+              {capacityData.length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={capacityData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis dataKey="name" stroke="#94a3b8" style={{ fontSize: '12px' }} />
+                      <YAxis stroke="#94a3b8" style={{ fontSize: '12px' }} allowDecimals={false} />
+                      <Tooltip />
+                      <Bar dataKey="value" name="Buses" radius={[4, 4, 0, 0]}>
+                        {capacityData.map((entry, i) => (
+                          <Cell key={i} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                  <div className="mt-4 space-y-2">
+                    {capacityData.map((item, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                          <span className="text-gray-600">{item.name}</span>
+                        </div>
+                        <span className="font-bold text-gray-900">{item.value} buses</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="h-[250px] flex items-center justify-center text-gray-400">No capacity data</div>
+              )}
+            </div>
+          </div>
+
+          {/* Fleet by Company */}
+          <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+            <h3 className="text-lg font-black font-['Montserrat'] text-[#2B2D42] mb-1">Fleet by Company</h3>
+            <p className="text-sm text-gray-500 mb-6">Bus count per company</p>
+            {companies.filter(c => c.buses > 0).length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={companies.filter(c => c.buses > 0).sort((a: any, b: any) => b.buses - a.buses).slice(0, 8).map((c: any) => ({ name: c.name.length > 15 ? c.name.slice(0, 15) + '...' : c.name, buses: c.buses }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="name" stroke="#94a3b8" style={{ fontSize: '11px' }} angle={-20} textAnchor="end" height={60} />
+                  <YAxis stroke="#94a3b8" style={{ fontSize: '12px' }} allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="buses" fill={COLORS.primary} radius={[4, 4, 0, 0]} name="Buses" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-[300px] flex items-center justify-center text-gray-400">No fleet data available</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
