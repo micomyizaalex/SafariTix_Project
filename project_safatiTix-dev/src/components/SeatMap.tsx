@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { User, Loader2 } from 'lucide-react';
 import { useAuth } from './AuthContext';
+import { useNavigate } from 'react-router-dom';
 
-type SeatState = 'AVAILABLE' | 'LOCKED' | 'BOOKED';
+type SeatState = 'AVAILABLE' | 'LOCKED' | 'BOOKED' | 'DRIVER';
 
 type Seat = {
   id?: number | string;
@@ -11,6 +12,7 @@ type Seat = {
   col?: number;
   side?: 'L' | 'R' | 'l' | 'r';
   state: SeatState;
+  is_driver?: boolean;
   lock_expires_at?: string | null;
 };
 
@@ -19,19 +21,32 @@ type SeatMapProps = {
   price?: number;
   className?: string;
   onBooked?: (result: any) => void;
+  onSelect?: (seat: any, lock?: any) => void; // Legacy callback for external booking flow
+  scheduleDetails?: {
+    routeFrom: string;
+    routeTo: string;
+    departureTime: string;
+    scheduleDate: string;
+    busPlateNumber: string;
+    companyName: string;
+  };
 };
 
-export default function SeatMap({ scheduleId, price = 0, className = '', onBooked }: SeatMapProps) {
+export default function SeatMap({ scheduleId, price = 0, className = '', onBooked, onSelect, scheduleDetails }: SeatMapProps) {
   const { user, accessToken } = useAuth();
+  const navigate = useNavigate();
   const [seats, setSeats] = useState<Seat[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
-  const [locking, setLocking] = useState(false);
-  const [result, setResult] = useState<any>(null);
 
-  const fetchSeats = async () => {
-    setLoading(true);
+  const fetchSeats = async (isAutoRefresh = false) => {
+    if (isAutoRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
       const hdrs: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -86,6 +101,22 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
       }
 
       setSeats(organized);
+      
+      // Log state verification
+      console.log(`\n🎫 SEAT MAP LOADED ====================`);
+      console.log(`Schedule: ${scheduleId}`);
+      console.log(`Total seats: ${organized.length}`);
+      const availCount = organized.filter(s => s.state === 'AVAILABLE').length;
+      const bookedCount = organized.filter(s => s.state === 'BOOKED').length;
+      const lockedCount = organized.filter(s => s.state === 'LOCKED').length;
+      console.log(`Available: ${availCount}`);
+      console.log(`Booked: ${bookedCount} 🔴`);
+      console.log(`Locked: ${lockedCount} 🟡`);
+      if (bookedCount > 0) {
+        const bookedSeats = organized.filter(s => s.state === 'BOOKED').map(s => s.seat_number).join(', ');
+        console.log(`Booked seats: ${bookedSeats}`);
+      }
+      console.log(`======================================\n`);
     } catch (err: any) {
       console.error('fetchSeats error', err);
       setError(err.message || 'Failed to load seats');
@@ -93,6 +124,7 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
       const fallback: Seat[] = [];
       for (let i = 1; i <= 29; i++) {
         fallback.push({ seat_number: String(i), state: 'BOOKED' } as Seat);
+      setRefreshing(false);
       }
       setSeats(fallback);
     } finally {
@@ -103,11 +135,45 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
   useEffect(() => {
     if (!scheduleId) return;
     fetchSeats();
+    
+    // Auto-refresh every 5 seconds for real-time updates
+    // This will automatically reflect any bookings made on the payment page
+    const intervalId = setInterval(() => {
+      fetchSeats(true);
+    }, 5000);
+    
+    return () => clearInterval(intervalId);
   }, [scheduleId, accessToken]);
 
   const toggleSelect = (seatNum: string, seatState: SeatState) => {
-    if (seatState !== 'AVAILABLE') return;
-    setSelected((s) => ({ ...s, [seatNum]: !s[seatNum] }));
+    console.log(`👆 Clicked seat ${seatNum} (state: ${seatState})`);
+    
+    // Prevent selecting driver seats
+    if (seatState === 'DRIVER') {
+      console.log(`⛔ Cannot select driver seat ${seatNum}`);
+      return;
+    }
+    
+    if (seatState !== 'AVAILABLE') {
+      console.log(`⛔ Cannot select seat ${seatNum} - Status: ${seatState}`);
+      return;
+    }
+    
+    console.log(`✅ Toggling seat ${seatNum}`);
+    setSelected((s) => {
+      const newSelection = { ...s, [seatNum]: !s[seatNum] };
+      console.log('Updated selection:', Object.keys(newSelection).filter(k => newSelection[k]));
+      return newSelection;
+    });
+    
+    // Legacy callback support (deprecated - SeatMap now handles booking internally)
+    if (onSelect) {
+      console.warn('⚠️ onSelect prop is deprecated. SeatMap now handles booking internally via confirmBooking()');
+      const seat = seats.find(st => st.seat_number === seatNum);
+      if (seat) {
+        onSelect(seat, null);
+      }
+    }
   };
 
   const handleKey = (e: React.KeyboardEvent, seatNum: string, state: SeatState) => {
@@ -119,81 +185,56 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
 
   const confirmBooking = async () => {
     const picks = Object.keys(selected).filter(k => selected[k]);
+    
+    console.log('🎫 Book button clicked');
+    console.log('Selected seats:', picks);
+    console.log('Schedule ID:', scheduleId);
+    console.log('Price per seat:', price);
+    
     if (picks.length === 0) {
-      setError('Select at least one seat');
+      setError('Please select at least one seat to continue');
+      console.warn('⚠️ No seats selected');
       return;
     }
+    
+    if (!user) {
+      setError('Please login to book seats');
+      console.warn('⚠️ User not authenticated');
+      setTimeout(() => navigate('/login'), 2000);
+      return;
+    }
+    
     setError(null);
-    setLocking(true);
-    const results: any[] = [];
-    const errs: string[] = [];
+    console.log('✅ Navigating to payment page...');
+    
     try {
-      const hdrs: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (accessToken) hdrs['Authorization'] = `Bearer ${accessToken}`;
-      for (const seatNum of picks) {
-        const body = { seat_number: seatNum, price };
-        try {
-          const res = await fetch(`/api/seats/schedules/${scheduleId}/book`, {
-            method: 'POST',
-            headers: hdrs,
-            body: JSON.stringify(body)
-          });
-          if (!res.ok) {
-            // If booking failed due to missing payment API or server error, fall back to a simulated ticket
-            const status = res.status;
-            const txt = await res.text().catch(() => null);
-            const textLower = String(txt || '').toLowerCase();
-            const simulate = status === 402 || status >= 500 || textLower.includes('payment') || textLower.includes('no payment');
-            if (simulate) {
-              // create a synthetic ticket for dev/local flows
-              const fake = { ticket: { id: `dev-${scheduleId}-${seatNum}-${Date.now()}`, seat: seatNum, simulated: true } };
-              results.push({ seat: seatNum, ticket: fake.ticket });
-              continue;
-            }
-            errs.push(`Seat ${seatNum}: ${txt || res.statusText}`);
-            continue;
-          }
-          const json = await res.json();
-          // API returns ticket object in { ticket }
-          results.push({ seat: seatNum, ticket: json.ticket });
-        } catch (err: any) {
-          errs.push(`Seat ${seatNum}: ${err.message || 'Failed'}`);
+      // Navigate to payment page with selected seats and schedule details
+      // NOTE: Cannot pass functions in navigation state (causes DataCloneError)
+      navigate('/dashboard/commuter/payment', {
+        state: {
+          selectedSeats: picks,
+          scheduleId,
+          price,
+          scheduleDetails
         }
-      }
-
-      if (errs.length > 0) {
-        setError(errs.join('; '));
-      }
-      setResult({ results, errors: errs });
-      if (onBooked) onBooked({ results, errors: errs });
-
-      // Attempt to refresh seats from server; if backend doesn't reflect booking (common in dev without payment),
-      // mark seats as BOOKED locally based on results.
-      try {
-        await fetchSeats();
-      } catch {
-        // ignore
-      }
-
-      const successSeats = results.map((r) => String((r.ticket && (r.ticket.seat || r.ticket.seat_number || r.ticket.id)) || r.seat));
-      if (successSeats.length > 0) {
-        setSeats((prev) => prev.map(s => (successSeats.includes(String(s.seat_number)) ? ({ ...s, state: 'BOOKED' } as Seat) : s)));
-      }
-
-      setSelected((prev) => {
-        const copy = { ...prev };
-        for (const s of successSeats) delete copy[s];
-        return copy;
       });
-      // If we have at least one confirmed ticket and no blocking errors, redirect to My Tickets
-      if (results.length > 0 && errs.length === 0) {
-        // small delay so user sees confirmation
-        setTimeout(() => { window.location.href = '/commuter/my-tickets'; }, 800);
-      }
-    } finally {
-      setLocking(false);
+      console.log('✅ Navigation initiated');
+    } catch (err) {
+      console.error('❌ Navigation error:', err);
+      setError('Failed to proceed to payment. Please try again.');
     }
   };
+
+  // Expose refresh function for external use
+  React.useEffect(() => {
+    if (onBooked) {
+      // Allow parent components to trigger refresh
+      (window as any).__refreshSeatMap = () => fetchSeats(false);
+    }
+    return () => {
+      delete (window as any).__refreshSeatMap;
+    };
+  }, [onBooked]);
 
   const layout = useMemo(() => {
     const seatsByNum = new Map<number, Seat>();
@@ -226,6 +267,55 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
     const id = String(seat.seat_number);
     const st = seat.state;
     const isSelected = !!selected[id];
+    const isDriver = seat.is_driver || st === 'DRIVER';
+    
+    // Define explicit styles for each state
+    const getStyle = () => {
+      if (isDriver) {
+        return {
+          background: 'linear-gradient(135deg, #6B7280 0%, #4B5563 100%)',
+          color: '#F3F4F6',
+          cursor: 'not-allowed',
+          opacity: 0.8,
+          border: '2px solid #374151'
+        };
+      }
+      if (st === 'BOOKED') {
+        return {
+          background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+          color: '#FFFFFF',
+          cursor: 'not-allowed',
+          opacity: 0.7,
+          border: '2px solid #B91C1C'
+        };
+      }
+      if (st === 'LOCKED') {
+        return {
+          background: 'linear-gradient(135deg, #FDE047 0%, #FACC15 100%)',
+          color: '#78350F',
+          cursor: 'not-allowed',
+          border: '3px solid #EAB308',
+          fontWeight: 'bold'
+        };
+      }
+      if (isSelected) {
+        return {
+          background: 'linear-gradient(135deg, #0077B6 0%, #005F8E 100%)',
+          color: '#FFFFFF',
+          cursor: 'pointer',
+          boxShadow: '0 4px 12px rgba(0, 119, 182, 0.4)',
+          transform: 'scale(1.05)',
+          border: '2px solid #003F5C'
+        };
+      }
+      // AVAILABLE
+      return {
+        background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+        color: '#FFFFFF',
+        cursor: 'pointer',
+        border: '2px solid #047857'
+      };
+    };
     
     return (
       <button
@@ -235,20 +325,39 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
         disabled={st !== 'AVAILABLE'}
         aria-pressed={isSelected}
         aria-label={`Seat ${id} ${st.toLowerCase()}`}
-        className={`
-          w-full aspect-square rounded-lg flex items-center justify-center
-          font-bold text-xs transition-all duration-150
-          ${st === 'BOOKED'
-            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-            : st === 'LOCKED'
-            ? 'bg-yellow-100 border-2 border-yellow-400 text-yellow-700 cursor-not-allowed'
-            : isSelected
-            ? 'bg-[#0077B6] text-white shadow-md scale-105 ring-1 ring-[#0077B6]/30'
-            : 'bg-white text-gray-900 border-2 border-gray-200 hover:border-[#0077B6] hover:shadow-sm hover:scale-105 active:scale-95'
+        title={
+          isDriver ? '🚫 Driver seat - Not available for booking' :
+          st === 'BOOKED' ? '🔴 Seat is booked - Not available' :
+          st === 'LOCKED' ? '🟡 Temporarily reserved by another user' :
+          isSelected ? '🔵 Click to deselect' :
+          '🟢 Click to select this seat'
+        }
+        style={{
+          ...getStyle(),
+          width: '100%',
+          aspectRatio: '1',
+          borderRadius: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontWeight: 'bold',
+          fontSize: '13px',
+          transition: 'all 0.2s ease'
+        }}
+        onMouseEnter={(e) => {
+          if (st === 'AVAILABLE' && !isSelected) {
+            e.currentTarget.style.transform = 'scale(1.1)';
+            e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
           }
-        `}
+        }}
+        onMouseLeave={(e) => {
+          if (st === 'AVAILABLE' && !isSelected) {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.boxShadow = 'none';
+          }
+        }}
       >
-        {id}
+        {st === 'BOOKED' ? '✕' : id}
       </button>
     );
   };
@@ -257,29 +366,63 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
     <div className={`w-full max-w-md mx-auto ${className}`}>
       {/* Header - ULTRA COMPACT */}
       <div className="bg-gradient-to-br from-[#0077B6] to-[#005F8E] rounded-t-xl p-2 text-white">
-        <h3 className="text-sm font-bold mb-2 flex items-center gap-1.5">
-          <div className="w-6 h-6 bg-white/20 rounded-md flex items-center justify-center text-xs">
-            🚌
+        <h3 className="text-sm font-bold mb-2 flex items-center gap-1.5 justify-between">
+          <div className="flex items-center gap-1.5">
+            <div className="w-6 h-6 bg-white/20 rounded-md flex items-center justify-center text-xs">
+              🚌
+            </div>
+            Select Seat
           </div>
-          Select Seat
+          {refreshing && (
+            <div className="flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded">
+              <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Updating
+            </div>
+          )}
         </h3>
         
         <div className="grid grid-cols-4 gap-1 text-[10px]">
           <div className="flex items-center gap-1 bg-white/10 rounded p-1">
-            <div className="w-3 h-3 rounded bg-white"></div>
-            <span>Free</span>
+            <div style={{
+              width: '12px',
+              height: '12px',
+              borderRadius: '3px',
+              background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+              border: '1px solid #047857'
+            }}></div>
+            <span className="font-semibold">Free</span>
           </div>
           <div className="flex items-center gap-1 bg-white/10 rounded p-1">
-            <div className="w-3 h-3 rounded bg-[#0077B6] border border-white"></div>
-            <span>Pick</span>
+            <div style={{
+              width: '12px',
+              height: '12px',
+              borderRadius: '3px',
+              background: 'linear-gradient(135deg, #0077B6 0%, #005F8E 100%)',
+              border: '1px solid #003F5C'
+            }}></div>
+            <span className="font-semibold">Pick</span>
           </div>
           <div className="flex items-center gap-1 bg-white/10 rounded p-1">
-            <div className="w-3 h-3 rounded bg-gray-400"></div>
-            <span>Taken</span>
+            <div style={{
+              width: '12px',
+              height: '12px',
+              borderRadius: '3px',
+              background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+              border: '1px solid #B91C1C'
+            }}></div>
+            <span className="font-semibold">Booked</span>
           </div>
           <div className="flex items-center gap-1 bg-white/10 rounded p-1">
-            <div className="w-3 h-3 rounded bg-yellow-400"></div>
-            <span>Lock</span>
+            <div style={{
+              width: '12px',
+              height: '12px',
+              borderRadius: '3px',
+              background: 'linear-gradient(135deg, #FDE047 0%, #FACC15 100%)',
+              border: '2px solid #EAB308'
+            }}></div>
+            <span className="font-semibold">Lock</span>
           </div>
         </div>
       </div>
@@ -361,102 +504,98 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
         )}
       </div>
 
-      {/* Selection Summary - ULTRA COMPACT */}
-      {selectedCount > 0 && (
-        <div className="mt-2.5 bg-gradient-to-br from-[#0077B6] to-[#005F8E] rounded-lg p-2.5 text-white shadow-lg">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex-1 min-w-0">
-              <div className="text-[10px] opacity-90 mb-0.5">Seats</div>
-              <div className="text-sm font-bold mb-0.5 truncate">{selectedSeats.join(', ')}</div>
-              <div className="text-xs">
-                <span className="font-bold">RWF {totalPrice.toLocaleString()}</span>
+      {/* Selection Summary & Booking - Always Visible */}
+      <div className="mt-2.5">
+        {selectedCount > 0 ? (
+          <div className="bg-gradient-to-br from-[#0077B6] to-[#005F8E] rounded-lg p-2.5 text-white shadow-lg">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] opacity-90 mb-0.5">Selected Seats</div>
+                <div className="text-sm font-bold mb-0.5 truncate">{selectedSeats.join(', ')}</div>
+                <div className="text-xs">
+                  <span className="font-bold">RWF {totalPrice.toLocaleString()}</span>
+                  <span className="opacity-80 ml-1">({selectedCount} {selectedCount === 1 ? 'seat' : 'seats'})</span>
+                </div>
+              </div>
+              
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => setSelected({})}
+                  className="bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold hover:bg-white/30 transition-all border border-white/30"
+                  title="Clear selection"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={confirmBooking}
+                  className="bg-white text-[#0077B6] px-4 py-1.5 rounded-md text-xs font-bold shadow-md hover:shadow-lg transition-all hover:scale-105 active:scale-95 flex items-center gap-1"
+                  title="Proceed to payment"
+                >
+                  Book Now
+                </button>
               </div>
             </div>
-            
-            <div className="flex gap-1.5">
-              <button
-                onClick={() => setSelected({})}
-                className="bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold hover:bg-white/30 transition-all border border-white/30"
-              >
-                Clear
-              </button>
+          </div>
+        ) : (
+          <div className="bg-gray-50 rounded-lg p-3 border-2 border-dashed border-gray-300">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex-1">
+                <div className="text-xs font-semibold text-gray-700 mb-0.5">
+                  No seats selected
+                </div>
+                <div className="text-[10px] text-gray-500">
+                  Select available seats above to continue
+                </div>
+              </div>
               <button
                 onClick={confirmBooking}
-                disabled={locking}
-                className="bg-white text-[#0077B6] px-4 py-1.5 rounded-md text-xs font-bold shadow-md hover:shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                disabled={true}
+                className="bg-gray-300 text-gray-500 px-4 py-1.5 rounded-md text-xs font-bold cursor-not-allowed opacity-60"
+                title="Please select a seat first"
               >
-                {locking ? (
-                  <>
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    Wait...
-                  </>
-                ) : (
-                  'Book'
-                )}
+                Book Now
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Refresh - ULTRA COMPACT */}
-      {!selectedCount && !loading && (
+      {/* Refresh Button */}
+      {!loading && (
         <div className="mt-2.5 flex justify-center">
           <button
-            onClick={fetchSeats}
-            className="bg-gray-100 text-gray-900 px-3 py-1.5 rounded-md text-xs font-semibold hover:bg-gray-200 transition-all flex items-center gap-1.5"
+            onClick={() => fetchSeats(false)}
+            disabled={refreshing}
+            className="bg-gray-100 text-gray-900 px-3 py-1.5 rounded-md text-xs font-semibold hover:bg-gray-200 transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            Refresh
+            {refreshing ? 'Updating...' : 'Refresh Seats'}
           </button>
         </div>
       )}
 
-      {/* Messages - ULTRA COMPACT */}
+      {/* Error/Success Messages */}
       {error && (
-        <div className="mt-2.5 bg-red-50 border border-red-200 rounded-lg p-2">
-          <div className="flex items-start gap-1.5">
-            <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-[10px] font-bold">!</span>
+        <div className="mt-2.5 bg-red-50 border-2 border-red-200 rounded-lg p-2.5 animate-pulse">
+          <div className="flex items-start gap-2">
+            <div className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+              <span className="text-white text-xs font-bold">!</span>
             </div>
-            <div>
-              <div className="font-semibold text-red-900 text-xs">Error</div>
-              <div className="text-[10px] text-red-700">{error}</div>
+            <div className="flex-1">
+              <div className="font-bold text-red-900 text-sm">Error</div>
+              <div className="text-xs text-red-700 mt-0.5">{error}</div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {result && result.errors && result.errors.length > 0 && (
-        <div className="mt-2 bg-yellow-50 border border-yellow-200 rounded-lg p-2">
-          <div className="flex items-start gap-1.5">
-            <div className="w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-[10px] font-bold">!</span>
-            </div>
-            <div>
-              <div className="font-semibold text-yellow-900 text-xs">Warning</div>
-              <div className="text-[10px] text-yellow-700">{result.errors.join('; ')}</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {result && result.results && result.results.length > 0 && !result.errors?.length && (
-        <div className="mt-2.5 bg-green-50 border border-green-200 rounded-lg p-2">
-          <div className="flex items-start gap-1.5">
-            <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0">
-              <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            <button
+              onClick={() => setError(null)}
+              className="text-red-400 hover:text-red-600 transition-colors"
+              aria-label="Dismiss error"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
-            </div>
-            <div>
-              <div className="font-semibold text-green-900 text-xs">Success!</div>
-              <div className="text-[10px] text-green-700">
-                {result.results.length} seat(s) booked
-              </div>
-            </div>
+            </button>
           </div>
         </div>
       )}

@@ -573,9 +573,21 @@ export default function ScheduleDetails() {
         <div style={styles.seatCard}>
           <div style={styles.seatCardTitle}>Select Your Seat</div>
           <div style={styles.seatCardDesc}>
-            Tap an available seat to reserve it. You have 7 minutes to complete payment.
+            Tap an available seat to reserve it. Click Book to proceed to payment.
           </div>
-          <SeatMap scheduleId={schedule.id} onSelect={onSeatSelect} />
+          <SeatMap 
+            scheduleId={schedule.id} 
+            price={schedule.price}
+            onSelect={onSeatSelect}
+            scheduleDetails={{
+              routeFrom: schedule.routeFrom || schedule.origin,
+              routeTo: schedule.routeTo || schedule.destination,
+              departureTime: schedule.departureTime,
+              scheduleDate: schedule.scheduleDate,
+              busPlateNumber: schedule.busPlateNumber || schedule.busNumber,
+              companyName: schedule.companyName || 'SafariTix',
+            }}
+          />
         </div>
 
         {/* Payment Bar */}

@@ -2,6 +2,16 @@ const { Schedule, Route, Bus, Company, Driver, Location, Ticket } = require('../
 const { Op } = require('sequelize');
 const pool = require('../config/pgPool');
 
+/**
+ * PUBLIC CONTROLLER - Schedule Search & Discovery
+ * 
+ * IMPORTANT: Driver Seat Handling
+ * - All seat availability calculations exclude driver seats (is_driver = true)
+ * - Only passenger seats (is_driver = false OR NULL) are counted as "available"
+ * - Schedules with 0 passenger seats available are filtered out from search results
+ * - This prevents showing "1 seat left" when only the driver seat remains
+ */
+
 // Get all available schedules for public booking
 const getAvailableSchedules = async (req, res) => {
   try {
@@ -61,11 +71,41 @@ const getAvailableSchedules = async (req, res) => {
       ]
     });
 
-    // Map and filter schedules with available seats
+    // Calculate real passenger seat availability for each schedule
     const now = new Date();
+    
+    // For each schedule, calculate passenger seats excluding driver
+    const schedulesWithRealAvailability = await Promise.all(
+      schedules.map(async (s) => {
+        // Count passenger seats (exclude driver seats)
+        const passengerSeatCount = await pool.query(
+          `SELECT COUNT(*) as count FROM seats 
+           WHERE bus_id = $1 AND (is_driver = false OR is_driver IS NULL)`,
+          [s.bus_id]
+        );
+        const totalPassengerSeats = parseInt(passengerSeatCount.rows[0]?.count || 0);
+        
+        // Count booked seats for this schedule
+        const bookedCount = await pool.query(
+          `SELECT COUNT(*) as count FROM tickets 
+           WHERE schedule_id = $1 AND status IN ('CONFIRMED', 'CHECKED_IN')`,
+          [s.id]
+        );
+        const bookedSeats = parseInt(bookedCount.rows[0]?.count || 0);
+        
+        // Calculate real availability
+        const realAvailable = totalPassengerSeats - bookedSeats;
+        
+        return {
+          ...s.toJSON(),
+          realAvailableSeats: realAvailable,
+          totalPassengerSeats: totalPassengerSeats
+        };
+      })
+    );
 
-    const mapped = schedules
-      .filter(s => s.available_seats > 0) // Only include schedules with available seats
+    const mapped = schedulesWithRealAvailability
+      .filter(s => s.realAvailableSeats > 0) // Only include schedules with real passenger seats available
       .filter(s => {
         // Exclude schedules where ticket sales are closed or departure time has passed
         if (s.ticket_status === 'CLOSED') return false;
@@ -81,10 +121,11 @@ const getAvailableSchedules = async (req, res) => {
         departureTime: s.departure_time,
         arrivalTime: s.arrival_time,
         price: parseFloat(s.price_per_seat || 0),
-        seatsAvailable: s.available_seats,
-        bookedSeats: s.booked_seats || 0,
-          status: s.status,
-          ticketStatus: s.ticket_status || 'OPEN',
+        seatsAvailable: s.realAvailableSeats, // Real passenger seat count
+        totalPassengerSeats: s.totalPassengerSeats,
+        bookedSeats: s.totalPassengerSeats - s.realAvailableSeats,
+        status: s.status,
+        ticketStatus: s.ticket_status || 'OPEN',
         ticketReason: (s.ticket_status === 'CLOSED') ? 'manual' : null
       }));
 
@@ -105,10 +146,8 @@ const searchSchedules = async (req, res) => {
     }
 
     const whereClause = {
-      status: 'scheduled',
-      available_seats: {
-        [Op.gt]: 0
-      }
+      status: 'scheduled'
+      // Note: available_seats filter removed - will calculate real availability below
     };
 
     // Add date filter if provided
@@ -167,9 +206,40 @@ const searchSchedules = async (req, res) => {
     });
 
     const now = new Date();
+    
+    // Calculate real passenger seat availability for each schedule
+    const schedulesWithRealAvailability = await Promise.all(
+      schedules.map(async (s) => {
+        // Count passenger seats (exclude driver seats)
+        const passengerSeatCount = await pool.query(
+          `SELECT COUNT(*) as count FROM seats 
+           WHERE bus_id = $1 AND (is_driver = false OR is_driver IS NULL)`,
+          [s.bus_id]
+        );
+        const totalPassengerSeats = parseInt(passengerSeatCount.rows[0]?.count || 0);
+        
+        // Count booked seats for this schedule
+        const bookedCount = await pool.query(
+          `SELECT COUNT(*) as count FROM tickets 
+           WHERE schedule_id = $1 AND status IN ('CONFIRMED', 'CHECKED_IN')`,
+          [s.id]
+        );
+        const bookedSeats = parseInt(bookedCount.rows[0]?.count || 0);
+        
+        // Calculate real availability
+        const realAvailable = totalPassengerSeats - bookedSeats;
+        
+        return {
+          ...s.toJSON(),
+          realAvailableSeats: realAvailable,
+          totalPassengerSeats: totalPassengerSeats,
+          realBookedSeats: bookedSeats
+        };
+      })
+    );
 
-    const mapped = schedules
-      .filter(s => s.available_seats > 0)
+    const mapped = schedulesWithRealAvailability
+      .filter(s => s.realAvailableSeats > 0) // Only show schedules with real passenger seats
       .filter(s => {
         if (s.ticket_status === 'CLOSED') return false;
         if (s.departure_time && new Date(s.departure_time) <= now) return false;
@@ -184,8 +254,9 @@ const searchSchedules = async (req, res) => {
       departureTime: s.departure_time,
       arrivalTime: s.arrival_time,
       price: parseFloat(s.price_per_seat || 0),
-      seatsAvailable: s.available_seats,
-      bookedSeats: s.booked_seats || 0,
+      seatsAvailable: s.realAvailableSeats, // Real passenger seat count
+      totalPassengerSeats: s.totalPassengerSeats,
+      bookedSeats: s.realBookedSeats,
       status: s.status,
       companyName: s.Bus?.Company?.name || 'N/A',
       busPlateNumber: s.Bus?.plate_number || 'N/A',
@@ -259,8 +330,27 @@ const getScheduleById = async (req, res) => {
     const { id } = req.params;
     const schedule = await Schedule.findByPk(id, { include: [Route, Bus] });
     if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
+    
+    // Calculate real passenger seat availability (exclude driver seats)
+    const passengerSeatCount = await pool.query(
+      `SELECT COUNT(*) as count FROM seats 
+       WHERE bus_id = $1 AND (is_driver = false OR is_driver IS NULL)`,
+      [schedule.bus_id]
+    );
+    const totalPassengerSeats = parseInt(passengerSeatCount.rows[0]?.count || 0);
+    
+    // Count booked seats for this schedule
+    const bookedCount = await pool.query(
+      `SELECT COUNT(*) as count FROM tickets 
+       WHERE schedule_id = $1 AND status IN ('CONFIRMED', 'CHECKED_IN')`,
+      [schedule.id]
+    );
+    const bookedSeats = parseInt(bookedCount.rows[0]?.count || 0);
+    const realAvailable = totalPassengerSeats - bookedSeats;
+    
     const now = new Date();
-    const bookable = schedule.status === 'scheduled' && schedule.ticket_status !== 'CLOSED' && (!(schedule.departure_time) || new Date(schedule.departure_time) > now);
+    const bookable = schedule.status === 'scheduled' && schedule.ticket_status !== 'CLOSED' && (!(schedule.departure_time) || new Date(schedule.departure_time) > now) && realAvailable > 0;
+    
     res.json({ schedule: {
       id: schedule.id,
       routeId: schedule.route_id,
@@ -269,8 +359,9 @@ const getScheduleById = async (req, res) => {
       departureTime: schedule.departure_time,
       arrivalTime: schedule.arrival_time,
       price: parseFloat(schedule.price_per_seat || 0),
-      availableSeats: schedule.available_seats,
-      bookedSeats: schedule.booked_seats,
+      availableSeats: realAvailable, // Real passenger seat availability
+      totalPassengerSeats: totalPassengerSeats,
+      bookedSeats: bookedSeats,
       status: schedule.status,
       bookable,
       routeFrom: schedule.Route?.origin || null,
@@ -454,6 +545,7 @@ const searchSchedulesPg = async (req, res) => {
     // Parameterized SQL query using ILIKE for case-insensitive matching
     // Includes bus plate number, driver name, and travel date
     // Uses schedule.driver_id first, falls back to bus.driver_id if schedule driver is not assigned
+    // Calculates REAL passenger seat availability by excluding driver seats
     const query = `
       SELECT 
         s.id,
@@ -461,13 +553,37 @@ const searchSchedulesPg = async (req, res) => {
         r.destination as to_location,
         s.departure_time,
         s.schedule_date,
-        s.available_seats,
-        s.booked_seats,
         s.price_per_seat as price,
         s.company_id,
         c.name as company_name,
         b.plate_number as bus_plate_number,
-        COALESCE(sd.name, bd.name) as driver_name
+        COALESCE(sd.name, bd.name) as driver_name,
+        -- Calculate passenger seats (exclude driver seats)
+        COALESCE(
+          (SELECT COUNT(*) FROM seats 
+           WHERE bus_id = s.bus_id 
+           AND (is_driver = false OR is_driver IS NULL)),
+          0
+        ) as total_passenger_seats,
+        -- Calculate booked seats for this schedule
+        COALESCE(
+          (SELECT COUNT(*) FROM tickets 
+           WHERE schedule_id = s.id 
+           AND status IN ('CONFIRMED', 'CHECKED_IN')),
+          0
+        ) as booked_seats,
+        -- Calculate available passenger seats
+        COALESCE(
+          (SELECT COUNT(*) FROM seats 
+           WHERE bus_id = s.bus_id 
+           AND (is_driver = false OR is_driver IS NULL)),
+          0
+        ) - COALESCE(
+          (SELECT COUNT(*) FROM tickets 
+           WHERE schedule_id = s.id 
+           AND status IN ('CONFIRMED', 'CHECKED_IN')),
+          0
+        ) as available_seats
       FROM schedules s
       INNER JOIN routes r ON s.route_id = r.id
       LEFT JOIN companies c ON s.company_id = c.id
@@ -477,8 +593,21 @@ const searchSchedulesPg = async (req, res) => {
       WHERE 
         r.origin ILIKE $1
         AND r.destination ILIKE $2
-        AND s.available_seats > 0
         AND s.status = 'scheduled'
+        -- Only show schedules with at least 1 passenger seat available
+        AND (
+          COALESCE(
+            (SELECT COUNT(*) FROM seats 
+             WHERE bus_id = s.bus_id 
+             AND (is_driver = false OR is_driver IS NULL)),
+            0
+          ) - COALESCE(
+            (SELECT COUNT(*) FROM tickets 
+             WHERE schedule_id = s.id 
+             AND status IN ('CONFIRMED', 'CHECKED_IN')),
+            0
+          )
+        ) > 0
       ORDER BY s.departure_time ASC
     `;
 
@@ -488,11 +617,18 @@ const searchSchedulesPg = async (req, res) => {
     const toPattern = `%${toLocation}%`;
 
     // Log search parameters (for debugging)
-    console.log('Searching schedules:', { from: fromLocation, to: toLocation });
+    console.log('🔍 Searching schedules:', { from: fromLocation, to: toLocation });
+    console.log('📋 Query filters passenger seats only (excludes driver seats)');
 
     const result = await client.query(query, [fromPattern, toPattern]);
     
-    console.log(`Found ${result.rows.length} matching schedules`);
+    console.log(`✅ Found ${result.rows.length} schedules with available passenger seats`);
+    
+    // Log sample result for debugging (first schedule if exists)
+    if (result.rows.length > 0) {
+      const sample = result.rows[0];
+      console.log(`📊 Sample schedule: ID=${sample.id}, Available=${sample.available_seats}, Booked=${sample.booked_seats}, Total Passenger Seats=${sample.total_passenger_seats}`);
+    }
 
     // Handle no results
     if (!result.rows || result.rows.length === 0) {
@@ -509,7 +645,8 @@ const searchSchedulesPg = async (req, res) => {
       to_location: row.to_location,
       departure_time: row.departure_time,
       schedule_date: row.schedule_date, // Travel date
-      available_seats: parseInt(row.available_seats, 10),
+      available_seats: parseInt(row.available_seats, 10), // Passenger seats only
+      total_passenger_seats: parseInt(row.total_passenger_seats, 10),
       booked_seats: parseInt(row.booked_seats || 0, 10),
       price: parseFloat(row.price || 0),
       company_id: row.company_id,

@@ -189,9 +189,18 @@ export function PaymentModal({
       setStep('success');
       setProcessing(false);
 
+      // Trigger immediate seat map refresh
+      if ((window as any).__refreshSeatMap) {
+        (window as any).__refreshSeatMap();
+      }
+
       setTimeout(() => {
         onSuccess();
         handleClose();
+        // Refresh again after navigation
+        if ((window as any).__refreshSeatMap) {
+          (window as any).__refreshSeatMap();
+        }
       }, 3000);
 
     } catch (err: any) {

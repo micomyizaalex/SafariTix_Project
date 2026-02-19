@@ -16,6 +16,7 @@ const Seat = sequelize.define(
     col: { type: DataTypes.INTEGER, allowNull: true },
     side: { type: DataTypes.ENUM("L", "R"), allowNull: true },
     is_window: { type: DataTypes.BOOLEAN, defaultValue: false },
+    is_driver: { type: DataTypes.BOOLEAN, defaultValue: false },
     meta: { type: DataTypes.JSONB, allowNull: true },
   },
   {

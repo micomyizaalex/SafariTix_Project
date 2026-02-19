@@ -427,10 +427,11 @@ const bookTicket = async (req, res) => {
         });
       }
 
-      // Find available seat numbers from seats table for the bus, excluding already confirmed tickets and active locks
+      // Find available seat numbers from seats table for the bus, excluding already confirmed tickets, active locks, and driver seats
       const availableSeatsQuery = `
         SELECT s.seat_number FROM seats s
         WHERE s.bus_id = $1
+        AND (s.is_driver = false OR s.is_driver IS NULL)
         AND s.seat_number NOT IN (
           SELECT seat_number FROM tickets WHERE schedule_id = $2 AND status IN ('CONFIRMED','CHECKED_IN')
         )
@@ -452,6 +453,9 @@ const bookTicket = async (req, res) => {
       const tickets = [];
       for (let i = 0; i < numTickets; i++) {
         const seatNumber = seatRows[i].seat_number;
+        
+        console.log(`[bookTicket] ✅ TICKET CREATED: Seat ${seatNumber} → Status: CONFIRMED`);
+        
         const bookingRef = `BK-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
         const ticketId = generateUUID();
         const ticketQuery = `

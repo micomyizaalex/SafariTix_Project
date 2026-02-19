@@ -134,17 +134,48 @@ export default function TicketsManagement() {
         body: JSON.stringify({ status: 'CANCELLED' }),
       });
 
-      if (response.ok) {
+      const data = await response.json();
+
+      if (response.ok && data.success !== false) {
         fetchTickets();
-        alert('Ticket cancelled successfully');
+        alert(data.message || 'Ticket cancelled successfully');
       } else {
-        const error = await response.json();
-        alert(`Failed to cancel ticket: ${error.error || 'Unknown error'}`);
+        // Show backend error message (including time restriction)
+        alert(data.error || data.message || 'Failed to cancel ticket');
       }
     } catch (error) {
       console.error('Failed to cancel ticket:', error);
       alert('Failed to cancel ticket');
     }
+  };
+
+  // Helper function to check if ticket can be cancelled (10-minute rule)
+  const canCancelTicket = (ticket: TicketData): { canCancel: boolean; reason?: string } => {
+    // Already cancelled or checked in
+    if (ticket.status === 'CANCELLED' || ticket.status === 'CHECKED_IN') {
+      return { canCancel: false, reason: 'Ticket already processed' };
+    }
+
+    // Check departure time
+    if (!ticket.departureTime || !ticket.scheduleDate) {
+      return { canCancel: true }; // Allow if time not set
+    }
+
+    // Combine date and time to get full departure datetime
+    const departureDateTimeStr = `${ticket.scheduleDate}T${ticket.departureTime}`;
+    const departureTime = new Date(departureDateTimeStr);
+    const now = new Date();
+    const timeDiffMinutes = (departureTime.getTime() - now.getTime()) / (1000 * 60);
+
+    if (timeDiffMinutes < 10) {
+      const minutesRemaining = Math.max(0, Math.round(timeDiffMinutes));
+      return { 
+        canCancel: false, 
+        reason: `Cannot cancel: departure in ${minutesRemaining} minute(s). Must be at least 10 minutes before departure.` 
+      };
+    }
+
+    return { canCancel: true };
   };
 
   const handleMarkCompleted = async (ticketId: string) => {
@@ -455,13 +486,23 @@ export default function TicketsManagement() {
                             >
                               <CheckCircle className="w-5 h-5" />
                             </button>
-                            <button
-                              onClick={() => handleCancelTicket(ticket.id)}
-                              className="text-[#E63946] hover:text-red-700 transition-colors"
-                              title="Cancel Ticket"
-                            >
-                              <Ban className="w-5 h-5" />
-                            </button>
+                            {(() => {
+                              const cancelCheck = canCancelTicket(ticket);
+                              return (
+                                <button
+                                  onClick={() => cancelCheck.canCancel && handleCancelTicket(ticket.id)}
+                                  className={`transition-colors ${
+                                    cancelCheck.canCancel
+                                      ? 'text-[#E63946] hover:text-red-700 cursor-pointer'
+                                      : 'text-gray-300 cursor-not-allowed'
+                                  }`}
+                                  title={cancelCheck.reason || 'Cancel Ticket'}
+                                  disabled={!cancelCheck.canCancel}
+                                >
+                                  <Ban className="w-5 h-5" />
+                                </button>
+                              );
+                            })()}
                           </>
                         )}
                       </div>
@@ -646,15 +687,30 @@ export default function TicketsManagement() {
                   >
                     Mark as Completed
                   </button>
-                  <button
-                    onClick={() => {
-                      handleCancelTicket(selectedTicket.id);
-                      setShowDetailsModal(false);
-                    }}
-                    className="px-4 py-2 bg-[#E63946] text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
-                  >
-                    Cancel Ticket
-                  </button>
+                  {(() => {
+                    const cancelCheck = canCancelTicket(selectedTicket);
+                    return (
+                      <button
+                        onClick={() => {
+                          if (cancelCheck.canCancel) {
+                            handleCancelTicket(selectedTicket.id);
+                            setShowDetailsModal(false);
+                          } else {
+                            alert(cancelCheck.reason || 'Cannot cancel this ticket');
+                          }
+                        }}
+                        className={`px-4 py-2 rounded-lg transition-colors font-medium ${
+                          cancelCheck.canCancel
+                            ? 'bg-[#E63946] text-white hover:bg-red-700 cursor-pointer'
+                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        }`}
+                        disabled={!cancelCheck.canCancel}
+                        title={cancelCheck.reason || 'Cancel Ticket'}
+                      >
+                        Cancel Ticket
+                      </button>
+                    );
+                  })()}
                 </>
               )}
               <button

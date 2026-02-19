@@ -33,6 +33,7 @@ import ReportsPage from './pages/ReportsPage';
 import DriverTracking from './pages/company/DriverTracking';
 import FirstLoginChange from './pages/FirstLoginChange';
 import AccountSettings from './pages/account/AccountSettings';
+import PaymentPage from './pages/commuter/PaymentPage';
 
 const App = () => {
   return (
@@ -64,6 +65,7 @@ const App = () => {
 
               <Route path='commuter' element={<RequireRole allowed={["commuter"]}><CommuterLayout/></RequireRole>}>
                 <Route index element={<CommuterDashboard/>} />
+                <Route path='payment' element={<PaymentPage/>} />
               </Route>
 
               {/* Account settings page */}

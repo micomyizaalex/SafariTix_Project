@@ -375,6 +375,9 @@ const getTickets = async (req, res) => {
 };
 
 const updateTicket = async (req, res) => {
+  const { sequelize } = require('../models');
+  const transaction = await sequelize.transaction();
+  
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -382,18 +385,74 @@ const updateTicket = async (req, res) => {
     const companyId = req.companyId || (await User.findByPk(userId)).company_id;
 
     if (!companyId) {
+      await transaction.rollback();
       return res.status(403).json({ error: 'No company associated with user' });
     }
 
-    // Find ticket
-    const ticket = await Ticket.findByPk(id);
+    // Find ticket with schedule information
+    const ticket = await Ticket.findByPk(id, { 
+      include: [{
+        model: Schedule,
+        attributes: ['id', 'departure_time', 'schedule_date']
+      }],
+      transaction 
+    });
+    
     if (!ticket) {
+      await transaction.rollback();
       return res.status(404).json({ error: 'Ticket not found' });
     }
 
     // Verify ticket belongs to company
     if (ticket.company_id !== companyId) {
+      await transaction.rollback();
       return res.status(403).json({ error: 'Unauthorized to update this ticket' });
+    }
+
+    const previousStatus = ticket.status;
+
+    // TIME-BASED CANCELLATION RULE: Check if cancelling and validate timing
+    if (status === 'CANCELLED' && (previousStatus === 'CONFIRMED' || previousStatus === 'CHECKED_IN')) {
+      const schedule = ticket.Schedule;
+      
+      if (!schedule) {
+        await transaction.rollback();
+        return res.status(400).json({ 
+          success: false,
+          error: 'Schedule not found for this ticket' 
+        });
+      }
+
+      // Get departure time
+      const departureTime = schedule.departure_time;
+      
+      if (!departureTime) {
+        await transaction.rollback();
+        return res.status(400).json({ 
+          success: false,
+          error: 'Departure time not set for this schedule' 
+        });
+      }
+
+      // Calculate time difference
+      const now = new Date();
+      const departure = new Date(departureTime);
+      const timeDiffMinutes = (departure.getTime() - now.getTime()) / (1000 * 60);
+
+      console.log(`[updateTicket] Cancellation check: Departure in ${timeDiffMinutes.toFixed(2)} minutes`);
+      
+      // Block cancellation if less than 10 minutes before departure
+      if (timeDiffMinutes < 10) {
+        await transaction.rollback();
+        return res.status(400).json({ 
+          success: false,
+          error: 'Ticket cannot be cancelled less than 10 minutes before departure',
+          message: 'Ticket cannot be cancelled less than 10 minutes before departure',
+          minutesRemaining: Math.round(timeDiffMinutes)
+        });
+      }
+
+      console.log(`[updateTicket] ✅ Cancellation allowed: ${timeDiffMinutes.toFixed(2)} minutes before departure`);
     }
 
     // Update ticket status
@@ -405,11 +464,32 @@ const updateTicket = async (req, res) => {
         ticket.checked_in_at = new Date();
       }
       
-      await ticket.save();
+      await ticket.save({ transaction });
+
+      // If cancelling a CONFIRMED or CHECKED_IN ticket, free up the seat
+      if (status === 'CANCELLED' && (previousStatus === 'CONFIRMED' || previousStatus === 'CHECKED_IN')) {
+        const schedule = await Schedule.findByPk(ticket.schedule_id, { 
+          transaction, 
+          lock: transaction.LOCK.UPDATE
+        });
+        
+        if (schedule) {
+          // Increment available seats and decrement booked seats
+          schedule.available_seats = parseInt(schedule.available_seats || 0) + 1;
+          schedule.booked_seats = Math.max(0, parseInt(schedule.booked_seats || 0) - 1);
+          await schedule.save({ transaction });
+          
+          console.log(`[updateTicket] ✅ Seat ${ticket.seat_number} on schedule ${ticket.schedule_id} is now AVAILABLE`);
+          console.log(`[updateTicket] Schedule ${ticket.schedule_id}: ${schedule.available_seats} available, ${schedule.booked_seats} booked`);
+        }
+      }
     }
 
+    await transaction.commit();
+
     res.json({ 
-      message: 'Ticket updated successfully', 
+      success: true,
+      message: status === 'CANCELLED' ? 'Ticket cancelled successfully' : 'Ticket updated successfully', 
       ticket: {
         id: ticket.id,
         status: ticket.status,
@@ -417,6 +497,7 @@ const updateTicket = async (req, res) => {
       }
     });
   } catch (error) {
+    await transaction.rollback();
     console.error('updateTicket error:', error);
     res.status(400).json({ error: error.message });
   }

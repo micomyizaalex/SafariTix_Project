@@ -18,4 +18,7 @@ router.post('/locks/:lockId/release', auth, seatController.releaseLock);
 // Directly book a seat (create CONFIRMED ticket + consume any lock) - requires auth
 router.post('/schedules/:scheduleId/book', auth, seatController.bookSeat);
 
+// PRODUCTION-READY: Book multiple seats with full concurrency safety
+router.post('/book-seats', auth, seatController.bookSeatsWithConcurrencySafety);
+
 module.exports = router;
