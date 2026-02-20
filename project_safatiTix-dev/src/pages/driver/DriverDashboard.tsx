@@ -6,6 +6,7 @@ import {
   ArrowRight, Star, Award, Activity,
 } from 'lucide-react';
 import { BrowserQRCodeReader } from '@zxing/browser';
+import DriverTracking from '../../components/DriverTracking';
 
 // ==================== SAMPLE DATA ====================
 const driverData = {
@@ -54,6 +55,7 @@ export default function DriverDashboard() {
   const [upcomingTrips, setUpcomingTrips] = useState<any[]>([]);
   const [dashboardStats, setDashboardStats] = useState({ tripsCompleted: 0, activeTrips: 0, totalPassengers: 0, revenue: 0 });
   const [recentPassengersState, setRecentPassengersState] = useState<any[]>(recentPassengers);
+  const [selectedScheduleForTracking, setSelectedScheduleForTracking] = useState<any | null>(null);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -61,10 +63,10 @@ export default function DriverDashboard() {
     const fetchData = async () => {
       try {
         const [meRes, schedRes, ctxRes, compRes] = await Promise.all([
-          fetch('/api/driver/me', { headers: { Authorization: `Bearer ${accessToken}` } }),
-          fetch('/api/driver/today-schedule', { headers: { Authorization: `Bearer ${accessToken}` } }),
-          fetch('/api/driver/context', { headers: { Authorization: `Bearer ${accessToken}` } }),
-          fetch('/api/company', { headers: { Authorization: `Bearer ${accessToken}` } }),
+          fetch(`${import.meta.env.VITE_API_BASE_URL}/api/driver/me`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+          fetch(`${import.meta.env.VITE_API_BASE_URL}/api/driver/today-schedule`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+          fetch(`${import.meta.env.VITE_API_BASE_URL}/api/driver/context`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+          fetch(`${import.meta.env.VITE_API_BASE_URL}/api/company`, { headers: { Authorization: `Bearer ${accessToken}` } }),
         ]);
 
         if (meRes.ok) {
@@ -97,7 +99,7 @@ export default function DriverDashboard() {
       setTripsLoading(true);
       setTripsError(null);
       try {
-        const res = await fetch('/api/driver/my-trips', { headers: { Authorization: `Bearer ${accessToken}` } });
+        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/driver/my-trips`, { headers: { Authorization: `Bearer ${accessToken}` } });
         if (!mounted) return;
         if (!res.ok) {
           const txt = await res.text().catch(() => null);
@@ -124,7 +126,7 @@ export default function DriverDashboard() {
     // Load dashboard aggregates (stats, upcoming trips, recent check-ins)
     const loadDashboard = async () => {
       try {
-        const res = await fetch('/api/driver/dashboard', { headers: { Authorization: `Bearer ${accessToken}` } });
+        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/driver/dashboard`, { headers: { Authorization: `Bearer ${accessToken}` } });
         if (!res.ok) return;
         const j = await res.json();
         if (!mounted) return;
@@ -139,6 +141,31 @@ export default function DriverDashboard() {
     loadDashboard();
     return () => { mounted = false; };
   }, [accessToken]);
+
+  // Handle Start Trip button click
+  const handleStartTrip = (schedule: any) => {
+    if (!schedule || !schedule.id) {
+      console.error('Invalid schedule for starting trip');
+      return;
+    }
+    console.log('🚀 Starting trip for schedule:', schedule.id);
+    setSelectedScheduleForTracking(schedule);
+    setActiveView('tracking');
+  };
+
+  // Refresh data after trip starts/ends
+  const handleTripStarted = () => {
+    console.log('✅ Trip started, refreshing data...');
+    // Reload schedules and trips
+    window.location.reload(); // Simple refresh, or you can re-fetch data
+  };
+
+  const handleTripEnded = () => {
+    console.log('✅ Trip ended, refreshing data...');
+    setSelectedScheduleForTracking(null);
+    setActiveView('dashboard');
+    window.location.reload(); // Simple refresh, or you can re-fetch data
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
@@ -473,7 +500,7 @@ function StatCard({ icon: Icon, label, value, color }: { icon: any, label: strin
 }
 
 // ==================== TRIPS VIEW ====================
-function TripsView({ trips, loading, error }: { trips?: any[], loading?: boolean, error?: string | null }) {
+function TripsView({ trips, loading, error, onStartTrip }: { trips?: any[], loading?: boolean, error?: string | null, onStartTrip?: (schedule: any) => void }) {
   const list = (trips && trips.length > 0) ? trips : [];
 
   const renderEntry = (s: any) => {
@@ -518,7 +545,10 @@ function TripsView({ trips, loading, error }: { trips?: any[], loading?: boolean
             </div>
           </div>
 
-          <button className="w-full bg-gradient-to-r from-[#27AE60] to-[#229954] text-white py-3 rounded-xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2">
+          <button 
+            onClick={() => onStartTrip?.(s)}
+            className="w-full bg-gradient-to-r from-[#27AE60] to-[#229954] text-white py-3 rounded-xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2"
+          >
             <Navigation className="w-5 h-5" />
             Start Trip
           </button>
@@ -557,7 +587,10 @@ function TripsView({ trips, loading, error }: { trips?: any[], loading?: boolean
           </div>
         </div>
 
-        <button className="w-full bg-gradient-to-r from-[#27AE60] to-[#229954] text-white py-3 rounded-xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2">
+        <button 
+          onClick={() => onStartTrip?.(s)}
+          className="w-full bg-gradient-to-r from-[#27AE60] to-[#229954] text-white py-3 rounded-xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2"
+        >
           <Navigation className="w-5 h-5" />
           Start Trip
         </button>
@@ -653,18 +686,42 @@ function PassengersView({ setShowScanner }: { setShowScanner: (show: boolean) =>
 }
 
 // ==================== TRACKING VIEW ====================
-function TrackingView() {
-  return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      <h1 className="text-2xl lg:text-3xl font-black text-slate-900">Live Tracking</h1>
-      
-      <div className="bg-white rounded-2xl border border-slate-200 p-8 aspect-video flex items-center justify-center">
-        <div className="text-center">
-          <MapPin className="w-16 h-16 text-[#0077B6] mx-auto mb-4" />
-          <div className="text-xl font-bold text-slate-900 mb-2">GPS Map View</div>
-          <p className="text-slate-600">Live tracking coming soon</p>
+function TrackingView({ schedule, onTripStarted, onTripEnded }: { schedule: any | null, onTripStarted?: () => void, onTripEnded?: () => void }) {
+  if (!schedule || !schedule.id) {
+    return (
+      <div className="max-w-7xl mx-auto space-y-6">
+        <h1 className="text-2xl lg:text-3xl font-black text-slate-900">Live Tracking</h1>
+        
+        <div className="bg-white rounded-2xl border border-slate-200 p-8 aspect-video flex items-center justify-center">
+          <div className="text-center">
+            <MapPin className="w-16 h-16 text-[#0077B6] mx-auto mb-4" />
+            <div className="text-xl font-bold text-slate-900 mb-2">No Active Trip</div>
+            <p className="text-slate-600">Click "Start Trip" on a schedule to begin GPS tracking</p>
+          </div>
         </div>
       </div>
+    );
+  }
+
+  // Get schedule status from backend (scheduled, in_progress, completed)
+  const initialStatus = schedule.status || 'scheduled';
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6">
+      <div className="mb-6">
+        <h1 className="text-2xl lg:text-3xl font-black text-slate-900">Live Tracking</h1>
+        <p className="text-slate-600 mt-2">
+          {schedule.routeFrom && schedule.routeTo ? `${schedule.routeFrom} → ${schedule.routeTo}` : 'Trip'}
+          {schedule.bus?.plateNumber && ` • ${schedule.bus.plateNumber}`}
+        </p>
+      </div>
+      
+      <DriverTracking
+        scheduleId={schedule.id}
+        initialStatus={initialStatus}
+        onTripStarted={onTripStarted}
+        onTripEnded={onTripEnded}
+      />
     </div>
   );
 }
@@ -819,7 +876,7 @@ function ScannerModal({ onClose }: { onClose: () => void }) {
     stopScanning();
 
     try {
-      const response = await fetch('/api/driver/scan', {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/driver/scan`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

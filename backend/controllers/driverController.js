@@ -304,28 +304,151 @@ const getDashboard = async (req, res) => {
 const startTrip = async (req, res) => {
 	try {
 		const { scheduleId } = req.body;
+		
+		if (!scheduleId) {
+			return res.status(400).json({ error: 'scheduleId is required' });
+		}
+		
 		const user = await User.findByPk(req.userId);
+		if (!user) {
+			return res.status(404).json({ error: 'User not found' });
+		}
+		
 		const schedule = await Schedule.findByPk(scheduleId);
-		if (!schedule || schedule.company_id !== user.company_id) return res.status(404).json({ error: 'Schedule not found' });
-		schedule.status = 'IN_PROGRESS';
-		await schedule.save();
-		res.json({ message: 'Trip started', schedule });
+		
+		if (!schedule) {
+			return res.status(404).json({ error: 'Schedule not found' });
+		}
+		
+		// Security: Verify driver belongs to same company
+		if (schedule.company_id !== user.company_id) {
+			return res.status(403).json({ error: 'Unauthorized: Schedule belongs to different company' });
+		}
+		
+		// Verify driver is assigned to this schedule
+		if (schedule.driver_id !== req.userId) {
+			return res.status(403).json({ error: 'Unauthorized: You are not the driver for this schedule' });
+		}
+		
+		// Verify schedule hasn't already started or completed
+		if (schedule.status === 'in_progress') {
+			return res.status(400).json({ error: 'Trip already started', schedule });
+		}
+		
+		if (schedule.status === 'completed') {
+			return res.status(400).json({ error: 'Trip already completed', schedule });
+		}
+		
+		// Update schedule to active status with start time
+		const now = new Date();
+		const client = await pool.connect();
+		
+		try {
+			await client.query(
+				`UPDATE schedules 
+				 SET status = 'in_progress', 
+				     trip_start_time = $1,
+				     updated_at = $1
+				 WHERE id = $2`,
+				[now, scheduleId]
+			);
+			
+			// Refresh schedule object
+			await schedule.reload();
+			
+			console.log(`🚌 Trip started: Schedule ${scheduleId} by driver ${req.userId} at ${now.toISOString()}`);
+			
+			res.json({ 
+				success: true,
+				message: 'Trip started successfully', 
+				schedule: {
+					id: schedule.id,
+					status: schedule.status,
+					tripStartTime: now.toISOString(),
+					routeId: schedule.route_id
+				}
+			});
+		} finally {
+			client.release();
+		}
 	} catch (err) {
-		res.status(400).json({ error: err.message });
+		console.error('Error in startTrip:', err);
+		res.status(500).json({ error: 'Failed to start trip', message: err.message });
 	}
 };
 
 const endTrip = async (req, res) => {
 	try {
 		const { scheduleId } = req.body;
+		
+		if (!scheduleId) {
+			return res.status(400).json({ error: 'scheduleId is required' });
+		}
+		
 		const user = await User.findByPk(req.userId);
+		if (!user) {
+			return res.status(404).json({ error: 'User not found' });
+		}
+		
 		const schedule = await Schedule.findByPk(scheduleId);
-		if (!schedule || schedule.company_id !== user.company_id) return res.status(404).json({ error: 'Schedule not found' });
-		schedule.status = 'COMPLETED';
-		await schedule.save();
-		res.json({ message: 'Trip ended', schedule });
+		
+		if (!schedule) {
+			return res.status(404).json({ error: 'Schedule not found' });
+		}
+		
+		// Security: Verify driver belongs to same company
+		if (schedule.company_id !== user.company_id) {
+			return res.status(403).json({ error: 'Unauthorized: Schedule belongs to different company' });
+		}
+		
+		// Verify driver is assigned to this schedule
+		if (schedule.driver_id !== req.userId) {
+			return res.status(403).json({ error: 'Unauthorized: You are not the driver for this schedule' });
+		}
+		
+		// Verify trip is actually in progress
+		if (schedule.status !== 'in_progress') {
+			return res.status(400).json({ 
+				error: 'Trip is not in progress', 
+				currentStatus: schedule.status 
+			});
+		}
+		
+		// Update schedule to completed with end time
+		const now = new Date();
+		const client = await pool.connect();
+		
+		try {
+			await client.query(
+				`UPDATE schedules 
+				 SET status = 'completed', 
+				     trip_end_time = $1,
+				     updated_at = $1
+				 WHERE id = $2`,
+				[now, scheduleId]
+			);
+			
+			// Refresh schedule object
+			await schedule.reload();
+			
+			console.log(`✅ Trip ended: Schedule ${scheduleId} by driver ${req.userId} at ${now.toISOString()}`);
+			
+			res.json({ 
+				success: true,
+				message: 'Trip ended successfully', 
+				schedule: {
+					id: schedule.id,
+					status: schedule.status,
+					tripEndTime: now.toISOString(),
+					routeId: schedule.route_id
+				}
+			});
+		} finally {
+			client.release();
+		}
 	} catch (err) {
-		res.status(400).json({ error: err.message });
+		console.error('Error in endTrip:', err);
+		res.status(500).json({ error: 'Failed to end trip', message: err.message });
 	}
 };
 

@@ -478,33 +478,31 @@ export default function TicketsManagement() {
                           <Eye className="w-5 h-5" />
                         </button>
                         {ticket.status !== 'CANCELLED' && ticket.status !== 'CHECKED_IN' && (
-                          <>
-                            <button
-                              onClick={() => handleMarkCompleted(ticket.id)}
-                              className="text-[#27AE60] hover:text-green-700 transition-colors"
-                              title="Mark as Completed"
-                            >
-                              <CheckCircle className="w-5 h-5" />
-                            </button>
-                            {(() => {
-                              const cancelCheck = canCancelTicket(ticket);
-                              return (
-                                <button
-                                  onClick={() => cancelCheck.canCancel && handleCancelTicket(ticket.id)}
-                                  className={`transition-colors ${
-                                    cancelCheck.canCancel
-                                      ? 'text-[#E63946] hover:text-red-700 cursor-pointer'
-                                      : 'text-gray-300 cursor-not-allowed'
-                                  }`}
-                                  title={cancelCheck.reason || 'Cancel Ticket'}
-                                  disabled={!cancelCheck.canCancel}
-                                >
-                                  <Ban className="w-5 h-5" />
-                                </button>
-                              );
-                            })()}
-                          </>
+                          <button
+                            onClick={() => handleMarkCompleted(ticket.id)}
+                            className="text-[#27AE60] hover:text-green-700 transition-colors"
+                            title="Mark as Completed"
+                          >
+                            <CheckCircle className="w-5 h-5" />
+                          </button>
                         )}
+                        {(() => {
+                          const cancelCheck = canCancelTicket(ticket);
+                          return (
+                            <button
+                              onClick={() => cancelCheck.canCancel && handleCancelTicket(ticket.id)}
+                              className={`transition-colors ${
+                                cancelCheck.canCancel
+                                  ? 'text-[#E63946] hover:text-red-700 cursor-pointer'
+                                  : 'text-gray-300 cursor-not-allowed'
+                              }`}
+                              title={cancelCheck.reason || 'Cancel Ticket'}
+                              disabled={!cancelCheck.canCancel}
+                            >
+                              <Ban className="w-5 h-5" />
+                            </button>
+                          );
+                        })()}
                       </div>
                     </td>
                   </tr>
@@ -677,42 +675,40 @@ export default function TicketsManagement() {
 
             <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex justify-end gap-3">
               {selectedTicket.status !== 'CANCELLED' && selectedTicket.status !== 'CHECKED_IN' && (
-                <>
+                <button
+                  onClick={() => {
+                    handleMarkCompleted(selectedTicket.id);
+                    setShowDetailsModal(false);
+                  }}
+                  className="px-4 py-2 bg-[#27AE60] text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                >
+                  Mark as Completed
+                </button>
+              )}
+              {(() => {
+                const cancelCheck = canCancelTicket(selectedTicket);
+                return (
                   <button
                     onClick={() => {
-                      handleMarkCompleted(selectedTicket.id);
-                      setShowDetailsModal(false);
+                      if (cancelCheck.canCancel) {
+                        handleCancelTicket(selectedTicket.id);
+                        setShowDetailsModal(false);
+                      } else {
+                        alert(cancelCheck.reason || 'Cannot cancel this ticket');
+                      }
                     }}
-                    className="px-4 py-2 bg-[#27AE60] text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                    className={`px-4 py-2 rounded-lg transition-colors font-medium ${
+                      cancelCheck.canCancel
+                        ? 'bg-[#E63946] text-white hover:bg-red-700 cursor-pointer'
+                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    }`}
+                    disabled={!cancelCheck.canCancel}
+                    title={cancelCheck.reason || 'Cancel Ticket'}
                   >
-                    Mark as Completed
+                    Cancel Ticket
                   </button>
-                  {(() => {
-                    const cancelCheck = canCancelTicket(selectedTicket);
-                    return (
-                      <button
-                        onClick={() => {
-                          if (cancelCheck.canCancel) {
-                            handleCancelTicket(selectedTicket.id);
-                            setShowDetailsModal(false);
-                          } else {
-                            alert(cancelCheck.reason || 'Cannot cancel this ticket');
-                          }
-                        }}
-                        className={`px-4 py-2 rounded-lg transition-colors font-medium ${
-                          cancelCheck.canCancel
-                            ? 'bg-[#E63946] text-white hover:bg-red-700 cursor-pointer'
-                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                        }`}
-                        disabled={!cancelCheck.canCancel}
-                        title={cancelCheck.reason || 'Cancel Ticket'}
-                      >
-                        Cancel Ticket
-                      </button>
-                    );
-                  })()}
-                </>
-              )}
+                );
+              })()}
               <button
                 onClick={() => setShowDetailsModal(false)}
                 className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"

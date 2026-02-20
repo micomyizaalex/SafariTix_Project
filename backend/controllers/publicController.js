@@ -486,11 +486,13 @@ const searchSchedulesPg = async (req, res) => {
   let client;
   let fromLocation = '';
   let toLocation = '';
+  let travelDate = '';
   
   try {
-    // Extract from and to from query params or body
-    const from = req.query.from || req.body.from;
-    const to = req.query.to || req.body.to;
+    // Extract from, to, and date from query params or body
+    const from = req.query.from || (req.body && req.body.from);
+    const to = req.query.to || (req.body && req.body.to);
+    const date = req.query.date || (req.body && req.body.date);
 
     // Validate input
     if (!from || !to) {
@@ -503,6 +505,7 @@ const searchSchedulesPg = async (req, res) => {
     // Trim whitespace
     fromLocation = from.trim();
     toLocation = to.trim();
+    travelDate = date ? date.trim() : '';
 
     // Check for empty strings after trimming
     if (!fromLocation || !toLocation) {
@@ -546,13 +549,15 @@ const searchSchedulesPg = async (req, res) => {
     // Includes bus plate number, driver name, and travel date
     // Uses schedule.driver_id first, falls back to bus.driver_id if schedule driver is not assigned
     // Calculates REAL passenger seat availability by excluding driver seats
-    const query = `
+    // Build query dynamically based on whether date is provided
+    let query = `
       SELECT 
         s.id,
         r.origin as from_location,
         r.destination as to_location,
         s.departure_time,
         s.schedule_date,
+        s.arrival_time,
         s.price_per_seat as price,
         s.company_id,
         c.name as company_name,
@@ -573,17 +578,23 @@ const searchSchedulesPg = async (req, res) => {
           0
         ) as booked_seats,
         -- Calculate available passenger seats
-        COALESCE(
-          (SELECT COUNT(*) FROM seats 
-           WHERE bus_id = s.bus_id 
-           AND (is_driver = false OR is_driver IS NULL)),
-          0
-        ) - COALESCE(
-          (SELECT COUNT(*) FROM tickets 
-           WHERE schedule_id = s.id 
-           AND status IN ('CONFIRMED', 'CHECKED_IN')),
-          0
-        ) as available_seats
+        -- Use seats table calculation if available, otherwise fall back to schedules.available_seats
+        CASE 
+          WHEN (SELECT COUNT(*) FROM seats WHERE bus_id = s.bus_id) > 0 THEN
+            COALESCE(
+              (SELECT COUNT(*) FROM seats 
+               WHERE bus_id = s.bus_id 
+               AND (is_driver = false OR is_driver IS NULL)),
+              0
+            ) - COALESCE(
+              (SELECT COUNT(*) FROM tickets 
+               WHERE schedule_id = s.id 
+               AND status IN ('CONFIRMED', 'CHECKED_IN')),
+              0
+            )
+          ELSE
+            s.available_seats
+        END as available_seats
       FROM schedules s
       INNER JOIN routes r ON s.route_id = r.id
       LEFT JOIN companies c ON s.company_id = c.id
@@ -593,34 +604,42 @@ const searchSchedulesPg = async (req, res) => {
       WHERE 
         r.origin ILIKE $1
         AND r.destination ILIKE $2
-        AND s.status = 'scheduled'
+        ${travelDate ? 'AND s.schedule_date = $3' : ''}
+        AND s.status IN ('scheduled', 'in_progress')
         -- Only show schedules with at least 1 passenger seat available
+        -- Use seats table calculation if available, otherwise fall back to schedules.available_seats
         AND (
-          COALESCE(
-            (SELECT COUNT(*) FROM seats 
-             WHERE bus_id = s.bus_id 
-             AND (is_driver = false OR is_driver IS NULL)),
-            0
-          ) - COALESCE(
-            (SELECT COUNT(*) FROM tickets 
-             WHERE schedule_id = s.id 
-             AND status IN ('CONFIRMED', 'CHECKED_IN')),
-            0
-          )
+          CASE 
+            WHEN (SELECT COUNT(*) FROM seats WHERE bus_id = s.bus_id) > 0 THEN
+              COALESCE(
+                (SELECT COUNT(*) FROM seats 
+                 WHERE bus_id = s.bus_id 
+                 AND (is_driver = false OR is_driver IS NULL)),
+                0
+              ) - COALESCE(
+                (SELECT COUNT(*) FROM tickets 
+                 WHERE schedule_id = s.id 
+                 AND status IN ('CONFIRMED', 'CHECKED_IN')),
+                0
+              )
+            ELSE
+              s.available_seats
+          END
         ) > 0
-      ORDER BY s.departure_time ASC
+      ORDER BY s.schedule_date ASC, s.departure_time ASC
     `;
 
     // Use parameterized query to prevent SQL injection
     // % wildcards for partial matching
     const fromPattern = `%${fromLocation}%`;
     const toPattern = `%${toLocation}%`;
+    const queryParams = travelDate ? [fromPattern, toPattern, travelDate] : [fromPattern, toPattern];
 
     // Log search parameters (for debugging)
-    console.log('🔍 Searching schedules:', { from: fromLocation, to: toLocation });
+    console.log('🔍 Searching schedules:', { from: fromLocation, to: toLocation, date: travelDate || 'any date' });
     console.log('📋 Query filters passenger seats only (excludes driver seats)');
 
-    const result = await client.query(query, [fromPattern, toPattern]);
+    const result = await client.query(query, queryParams);
     
     console.log(`✅ Found ${result.rows.length} schedules with available passenger seats`);
     
@@ -643,14 +662,23 @@ const searchSchedulesPg = async (req, res) => {
       id: row.id,
       from_location: row.from_location,
       to_location: row.to_location,
+      from: row.from_location, // Alias for frontend compatibility
+      to: row.to_location, // Alias for frontend compatibility
       departure_time: row.departure_time,
+      departureTime: row.departure_time, // Alias
+      arrival_time: row.arrival_time,
+      arrivalTime: row.arrival_time, // Alias
       schedule_date: row.schedule_date, // Travel date
+      date: row.schedule_date, // Alias
       available_seats: parseInt(row.available_seats, 10), // Passenger seats only
+      availableSeats: parseInt(row.available_seats, 10), // Alias
       total_passenger_seats: parseInt(row.total_passenger_seats, 10),
+      totalSeats: parseInt(row.total_passenger_seats, 10), // Alias
       booked_seats: parseInt(row.booked_seats || 0, 10),
       price: parseFloat(row.price || 0),
       company_id: row.company_id,
       company_name: row.company_name || 'N/A',
+      company: row.company_name || 'N/A', // Alias
       bus_plate_number: row.bus_plate_number || 'N/A',
       driver_name: row.driver_name || 'No driver assigned'
     }));
@@ -668,7 +696,8 @@ const searchSchedulesPg = async (req, res) => {
       detail: error.detail,
       hint: error.hint,
       from: fromLocation,
-      to: toLocation
+      to: toLocation,
+      date: travelDate || 'any date'
     });
     
     // Handle database-specific errors
@@ -978,6 +1007,135 @@ const scanTicket = async (req, res) => {
   }
 };
 
+// Cancel a ticket (user canceling their own ticket)
+const cancelTicket = async (req, res) => {
+  const { ticketId } = req.params;
+  const userId = req.user?.id;
+
+  if (!userId) {
+    return res.status(401).json({ 
+      success: false,
+      error: 'Unauthorized',
+      message: 'User not authenticated'
+    });
+  }
+
+  let client;
+  try {
+    client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+
+      // Fetch ticket with schedule details
+      const ticketQuery = `
+        SELECT t.*, s.departure_time, s.schedule_date, s.available_seats, s.booked_seats, t.status as previous_status
+        FROM tickets t
+        INNER JOIN schedules s ON t.schedule_id = s.id
+        WHERE t.id = $1 AND t.passenger_id = $2
+      `;
+      
+      const ticketResult = await client.query(ticketQuery, [ticketId, userId]);
+
+      if (ticketResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(404).json({ 
+          success: false,
+          error: 'Ticket not found or you do not have permission to cancel this ticket',
+          message: 'Ticket not found or you do not have permission to cancel this ticket'
+        });
+      }
+
+      const ticket = ticketResult.rows[0];
+      const previousStatus = ticket.previous_status;
+
+      // Check if ticket is already cancelled or checked in
+      if (previousStatus === 'CANCELLED') {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ 
+          success: false,
+          error: 'Ticket is already cancelled',
+          message: 'Ticket is already cancelled'
+        });
+      }
+
+      if (previousStatus === 'CHECKED_IN') {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ 
+          success: false,
+          error: 'Cannot cancel a checked-in ticket',
+          message: 'Cannot cancel a checked-in ticket'
+        });
+      }
+
+      // Check 10-minute rule
+      const departureTime = ticket.departure_time;
+      const now = new Date();
+      const departure = new Date(departureTime);
+      const timeDiffMinutes = (departure.getTime() - now.getTime()) / (1000 * 60);
+
+      if (timeDiffMinutes < 10) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ 
+          success: false,
+          error: 'Ticket cannot be cancelled less than 10 minutes before departure',
+          message: 'Ticket cannot be cancelled less than 10 minutes before departure',
+          minutesRemaining: Math.round(timeDiffMinutes)
+        });
+      }
+
+      // Update ticket status to CANCELLED
+      await client.query(
+        'UPDATE tickets SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+        ['CANCELLED', ticketId]
+      );
+
+      // Unlock the seat
+      const seatNumber = ticket.seat_number;
+      await client.query(
+        'DELETE FROM seat_locks WHERE schedule_id = $1 AND seat_number = $2',
+        [ticket.schedule_id, seatNumber]
+      );
+
+      // Update schedule seat counts
+      const newAvailableSeats = ticket.available_seats + 1;
+      const newBookedSeats = ticket.booked_seats - 1;
+      
+      await client.query(
+        'UPDATE schedules SET available_seats = $1, booked_seats = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+        [newAvailableSeats, newBookedSeats, ticket.schedule_id]
+      );
+
+      await client.query('COMMIT');
+      client.release();
+
+      res.json({ 
+        success: true,
+        message: 'Ticket cancelled successfully',
+        ticket: {
+          id: ticket.id,
+          status: 'CANCELLED'
+        }
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  } catch (error) {
+    if (client) client.release();
+    console.error('Cancel ticket error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message || 'Failed to cancel ticket',
+      message: error.message || 'Failed to cancel ticket'
+    });
+  }
+};
+
 module.exports = {
   getAvailableSchedules,
   searchSchedules,
@@ -987,5 +1145,6 @@ module.exports = {
   getTickets,
   getTicketById, // Get single ticket by ID
   scanTicket, // Scan ticket by QR code
-  getScheduleById
+  getScheduleById,
+  cancelTicket // Cancel user's own ticket
 };

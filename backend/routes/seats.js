@@ -3,6 +3,10 @@ const router = express.Router();
 const seatController = require('../controllers/seatController');
 const auth = require('../middleware/authenticate');
 
+// NEW: Get only booked seat numbers (seats with PAID/CONFIRMED tickets)
+// IMPORTANT: This must be BEFORE /schedules/:scheduleId to avoid route conflict
+router.get('/schedules/:scheduleId/booked-seats', seatController.getBookedSeats);
+
 // Public read access for available seats for a schedule
 router.get('/schedules/:scheduleId', seatController.getSeatsForSchedule);
 

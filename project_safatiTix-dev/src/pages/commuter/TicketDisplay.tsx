@@ -3,7 +3,7 @@ import { QRCodeCanvas } from 'qrcode.react';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Ticket as TicketIcon, XCircle, Loader2 } from 'lucide-react';
+import { Ticket as TicketIcon, XCircle, Loader2, Ban } from 'lucide-react';
 import { useAuth } from '../../components/AuthContext';
 import { API_URL } from '../../utils/supabase-client';
 
@@ -17,6 +17,7 @@ export function TicketDisplay({ ticket: initialTicket, onClose }: TicketDisplayP
   const [ticket, setTicket] = useState<any>(initialTicket);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const qrRef = useRef<HTMLCanvasElement | null>(null);
 
   // Fetch full ticket details if we only have an ID
@@ -117,6 +118,77 @@ export function TicketDisplay({ ticket: initialTicket, onClose }: TicketDisplayP
       'card_payment': 'Card Payment'
     };
     return methods[method] || method;
+  };
+
+  // Check if ticket can be cancelled
+  const canCancelTicket = (): { canCancel: boolean; reason?: string } => {
+    // Already cancelled or checked in
+    if (ticket?.status === 'cancelled' || ticket?.status === 'CANCELLED') {
+      return { canCancel: false, reason: 'Ticket already cancelled' };
+    }
+    if (ticket?.status === 'checked_in' || ticket?.status === 'CHECKED_IN') {
+      return { canCancel: false, reason: 'Cannot cancel checked-in ticket' };
+    }
+
+    // Check departure time
+    if (!ticket?.departureTime || !ticket?.scheduleDate) {
+      return { canCancel: true }; // Allow if time not set
+    }
+
+    // Combine date and time
+    const departureDateTimeStr = `${ticket.scheduleDate}T${ticket.departureTime}`;
+    const departureTime = new Date(departureDateTimeStr);
+    const now = new Date();
+    const timeDiffMinutes = (departureTime.getTime() - now.getTime()) / (1000 * 60);
+
+    if (timeDiffMinutes < 10) {
+      const minutesRemaining = Math.max(0, Math.round(timeDiffMinutes));
+      return { 
+        canCancel: false, 
+        reason: `Cannot cancel: departure in ${minutesRemaining} minute(s). Must be at least 10 minutes before departure.` 
+      };
+    }
+
+    return { canCancel: true };
+  };
+
+  // Handle ticket cancellation
+  const handleCancelTicket = async () => {
+    const cancelCheck = canCancelTicket();
+    if (!cancelCheck.canCancel) {
+      alert(cancelCheck.reason || 'Cannot cancel this ticket');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to cancel this ticket? This action cannot be undone.')) {
+      return;
+    }
+
+    setCancelling(true);
+    try {
+      const response = await fetch(`${API_URL}/tickets/${ticket.id}/cancel`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success !== false) {
+        alert(data.message || 'Ticket cancelled successfully');
+        // Update ticket status in state
+        setTicket({ ...ticket, status: 'CANCELLED' });
+      } else {
+        alert(data.error || data.message || 'Failed to cancel ticket');
+      }
+    } catch (error) {
+      console.error('Failed to cancel ticket:', error);
+      alert('Failed to cancel ticket. Please try again.');
+    } finally {
+      setCancelling(false);
+    }
   };
 
   // QR code data - encode ticket ID for scanning
@@ -341,6 +413,34 @@ export function TicketDisplay({ ticket: initialTicket, onClose }: TicketDisplayP
             >
               Download QR
             </Button>
+            {(() => {
+              const cancelCheck = canCancelTicket();
+              return (
+                <Button
+                  variant="outline"
+                  onClick={handleCancelTicket}
+                  disabled={!cancelCheck.canCancel || cancelling}
+                  className={`text-sm h-8 ${
+                    cancelCheck.canCancel && !cancelling
+                      ? 'text-[#E63946] hover:text-red-700 hover:bg-red-50 border-[#E63946]'
+                      : 'text-gray-400 cursor-not-allowed'
+                  }`}
+                  title={cancelCheck.reason || 'Cancel Ticket'}
+                >
+                  {cancelling ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      Cancelling...
+                    </>
+                  ) : (
+                    <>
+                      <Ban className="w-4 h-4 mr-1" />
+                      Cancel
+                    </>
+                  )}
+                </Button>
+              );
+            })()}
           </div>
         </CardContent>
       </Card>

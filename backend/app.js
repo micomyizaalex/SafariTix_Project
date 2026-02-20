@@ -80,6 +80,11 @@ const startServer = async () => {
       console.log(`Frontend: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
     });
     
+    // Initialize Socket.IO for real-time GPS tracking
+    const { initializeSocket } = require('./config/socket');
+    initializeSocket(server);
+    console.log(' Socket.IO initialized for real-time tracking');
+    
     server.on('error', (error) => {
       console.error('Server error:', error);
       process.exit(1);

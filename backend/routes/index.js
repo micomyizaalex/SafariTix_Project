@@ -41,6 +41,7 @@ router.get('/tracking', publicController.getLocations);
 // User endpoints (authentication required)
 router.get('/tickets', auth, publicController.getTickets);
 router.get('/tickets/:ticketId', auth, publicController.getTicketById);
+router.patch('/tickets/:ticketId/cancel', auth, publicController.cancelTicket);
 
 // Public ticket scanning (for inspectors/drivers)
 router.get('/tickets/scan/:ticketId', publicController.scanTicket);

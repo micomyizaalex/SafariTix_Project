@@ -25,6 +25,8 @@ import {
   Share2,
   Menu,
   Plus,
+  Ban,
+  Loader2,
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { useAuth } from '../../components/AuthContext';
@@ -43,6 +45,7 @@ export default function CommuterDashboard() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
   const [seats, setSeats] = useState<any[]>([]);
   const [seatsLoading, setSeatsLoading] = useState(false);
   const [selectedSeatsMap, setSelectedSeatsMap] = useState<Record<string, boolean>>({});
@@ -102,10 +105,37 @@ export default function CommuterDashboard() {
   // Search state
   const [fromInput, setFromInput] = useState('');
   const [toInput, setToInput] = useState('');
+  const [dateInput, setDateInput] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchPerformed, setSearchPerformed] = useState(false);
+
+  // Fetch user tickets - extracted to be reusable
+  const fetchTickets = async () => {
+    const hdrs: Record<string,string> = { 'Content-Type': 'application/json' };
+    if (accessToken) hdrs['Authorization'] = `Bearer ${accessToken}`;
+    
+    try {
+      const res = await fetch('/api/tickets', { headers: hdrs });
+      if (res.ok) {
+        const json = await res.json();
+        const tickets = Array.isArray(json.tickets) ? json.tickets : (json.tickets || []);
+        // upcoming: only CONFIRMED
+        const confirmed = tickets.filter((t:any) => t.status === 'CONFIRMED');
+        setUpcomingTrips(confirmed);
+        // recent bookings: latest tickets (all statuses) sorted by createdAt
+        const recent = tickets.slice().sort((a:any,b:any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setRecentBookings(recent);
+      } else {
+        setUpcomingTrips([]);
+        setRecentBookings([]);
+      }
+    } catch (e) {
+      setUpcomingTrips([]);
+      setRecentBookings([]);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -113,7 +143,7 @@ export default function CommuterDashboard() {
     if (accessToken) hdrs['Authorization'] = `Bearer ${accessToken}`;
 
     // Fetch user tickets directly from /api/tickets
-    const fetchTickets = async () => {
+    const fetchTicketsInEffect = async () => {
       try {
         const res = await fetch('/api/tickets', { headers: hdrs });
         if (!mounted) return;
@@ -193,7 +223,7 @@ export default function CommuterDashboard() {
       }
     };
 
-    fetchTickets();
+    fetchTicketsInEffect();
     fetchSchedules();
     fetchStats();
     fetchNotifs();
@@ -206,6 +236,7 @@ export default function CommuterDashboard() {
     setSearchError(null);
     const from = fromInput.trim();
     const to = toInput.trim();
+    const date = dateInput.trim();
     if (!from || !to) return setSearchError('Enter both departure and arrival cities');
 
     setSearchPerformed(true);
@@ -214,7 +245,13 @@ export default function CommuterDashboard() {
     try {
       const hdrs: Record<string,string> = { 'Content-Type': 'application/json' };
       if (accessToken) hdrs['Authorization'] = `Bearer ${accessToken}`;
-      const qs = `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+      
+      // Build query string with optional date
+      let qs = `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+      if (date) {
+        qs += `&date=${encodeURIComponent(date)}`;
+      }
+      
       const res = await fetch(`/api/schedules/search${qs}`, { headers: hdrs });
       const contentType = (res.headers.get('content-type') || '').toLowerCase();
       if (!res.ok) {
@@ -226,6 +263,7 @@ export default function CommuterDashboard() {
           const jsonAlt = await alt.json();
           const list = Array.isArray(jsonAlt) ? jsonAlt : (jsonAlt.schedules || jsonAlt.schedules || jsonAlt);
           setSearchResults(list || []);
+          console.log('🔍 Search results:', list);
         } else if (alt.ok) {
           const text = await alt.text();
           console.error('Fallback /search-pg returned non-JSON:', text);
@@ -243,14 +281,18 @@ export default function CommuterDashboard() {
         const altCt = (alt.headers.get('content-type') || '').toLowerCase();
         if (alt.ok && altCt.includes('application/json')) {
           const jsonAlt = await alt.json();
-          setSearchResults(Array.isArray(jsonAlt) ? jsonAlt : jsonAlt.schedules || []);
+          const results = Array.isArray(jsonAlt) ? jsonAlt : jsonAlt.schedules || [];
+          setSearchResults(results);
+          console.log('🔍 Search results:', results);
         } else {
           setSearchResults([]);
           setSearchError('Failed to search schedules');
         }
       } else {
         const json = await res.json();
-        setSearchResults(Array.isArray(json) ? json : json.schedules || []);
+        const results = Array.isArray(json) ? json : json.schedules || [];
+        setSearchResults(results);
+        console.log('🔍 Search results:', results);
       }
     } catch (err) {
       console.error('Search schedules error:', err);
@@ -398,6 +440,81 @@ export default function CommuterDashboard() {
     }
   };
 
+  // Check if ticket can be cancelled
+  const canCancelTicket = (ticket: any): { canCancel: boolean; reason?: string } => {
+    // Already cancelled or checked in
+    if (ticket?.status === 'CANCELLED' || ticket?.status === 'cancelled') {
+      return { canCancel: false, reason: 'Ticket already cancelled' };
+    }
+    if (ticket?.status === 'CHECKED_IN' || ticket?.status === 'checked_in') {
+      return { canCancel: false, reason: 'Cannot cancel checked-in ticket' };
+    }
+
+    // Check departure time
+    if (!ticket?.time || !ticket?.date) {
+      return { canCancel: true }; // Allow if time not set
+    }
+
+    // Combine date and time
+    const departureDateTimeStr = `${ticket.date}T${ticket.time}`;
+    const departureTime = new Date(departureDateTimeStr);
+    const now = new Date();
+    const timeDiffMinutes = (departureTime.getTime() - now.getTime()) / (1000 * 60);
+
+    if (timeDiffMinutes < 10) {
+      const minutesRemaining = Math.max(0, Math.round(timeDiffMinutes));
+      return { 
+        canCancel: false, 
+        reason: `Cannot cancel: departure in ${minutesRemaining} minute(s). Must be at least 10 minutes before departure.` 
+      };
+    }
+
+    return { canCancel: true };
+  };
+
+  // Handle ticket cancellation
+  const handleCancelTicket = async (ticket: any) => {
+    const cancelCheck = canCancelTicket(ticket);
+    if (!cancelCheck.canCancel) {
+      alert(cancelCheck.reason || 'Cannot cancel this ticket');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to cancel this ticket? This action cannot be undone.')) {
+      return;
+    }
+
+    setCancelling(true);
+    try {
+      const hdrs: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (accessToken) hdrs['Authorization'] = `Bearer ${accessToken}`;
+
+      const response = await fetch(`/api/tickets/${ticket.id}/cancel`, {
+        method: 'PATCH',
+        headers: hdrs,
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success !== false) {
+        alert(data.message || 'Ticket cancelled successfully');
+        // Update ticket status in state
+        setSelectedTicket({ ...ticket, status: 'CANCELLED' });
+        // Refresh tickets
+        fetchTickets();
+      } else {
+        alert(data.error || data.message || 'Failed to cancel ticket');
+      }
+    } catch (error) {
+      console.error('Failed to cancel ticket:', error);
+      alert('Failed to cancel ticket. Please try again.');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const renderHome = () => (
     <div className="space-y-6">
       {/* Hero Section - Next Trip */}
@@ -489,7 +606,7 @@ export default function CommuterDashboard() {
         </h3>
         
         <form onSubmit={handleSearch} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">From</label>
               <div className="relative">
@@ -513,6 +630,21 @@ export default function CommuterDashboard() {
                   placeholder="Arrival city"
                   value={toInput}
                   onChange={(e) => setToInput(e.target.value)}
+                  className="w-full pl-12 pr-4 py-4 rounded-xl border-2 border-gray-200 focus:border-[#0077B6] focus:outline-none transition-all text-gray-900 font-medium"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Date (Optional)</label>
+              <div className="relative">
+                <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  type="date"
+                  placeholder="Travel date"
+                  value={dateInput}
+                  onChange={(e) => setDateInput(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
                   className="w-full pl-12 pr-4 py-4 rounded-xl border-2 border-gray-200 focus:border-[#0077B6] focus:outline-none transition-all text-gray-900 font-medium"
                 />
               </div>
@@ -1100,6 +1232,37 @@ export default function CommuterDashboard() {
                     <Share2 className="w-5 h-5" />
                     Share
                   </button>
+                </div>
+
+                {/* Cancel Button */}
+                <div className="mt-3">
+                  {(() => {
+                    const cancelCheck = canCancelTicket(selectedTicket);
+                    return (
+                      <button
+                        onClick={() => handleCancelTicket(selectedTicket)}
+                        disabled={!cancelCheck.canCancel || cancelling}
+                        className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold transition-all duration-300 ${
+                          cancelCheck.canCancel && !cancelling
+                            ? 'bg-red-500 text-white hover:bg-red-600'
+                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        }`}
+                        title={cancelCheck.reason || 'Cancel Ticket'}
+                      >
+                        {cancelling ? (
+                          <>
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            Cancelling...
+                          </>
+                        ) : (
+                          <>
+                            <Ban className="w-5 h-5" />
+                            Cancel Ticket
+                          </>
+                        )}
+                      </button>
+                    );
+                  })()}
                 </div>
               </>
             ) : (

@@ -1,5 +1,6 @@
 const { sequelize, Seat, SeatLock, Ticket, Schedule, Bus, Route } = require('../models');
 const { Op } = require('sequelize');
+const pool = require('../config/pgPool');
 
 const LOCK_DURATION_MINUTES = parseInt(process.env.SEAT_LOCK_MINUTES || '7', 10);
 
@@ -98,6 +99,15 @@ const getSeatsForSchedule = async (req, res) => {
     console.log(`  BOOKED: ${bookedSeats}`);
     console.log(`  LOCKED: ${lockedSeats}`);
     console.log(`  Total Passenger Seats: ${passengerSeats.length}`);
+    
+    // List booked seat numbers
+    const bookedSeatNumbers = seatMap
+      .filter(s => s.state === 'BOOKED')
+      .map(s => s.seat_number)
+      .sort((a, b) => parseInt(a) - parseInt(b));
+    if (bookedSeatNumbers.length > 0) {
+      console.log(`  🔴 Booked seats: ${bookedSeatNumbers.join(', ')}`);
+    }
     console.log(`==========================================\n`);
 
     res.json({ 
@@ -116,6 +126,98 @@ const getSeatsForSchedule = async (req, res) => {
     console.error('Error stack:', error.stack);
     console.error('Schedule ID:', scheduleId);
     res.status(500).json({ message: 'Failed to load seats', error: error.message });
+  }
+};
+
+/**
+ * Get booked seat numbers for a schedule
+ * Returns only seats with CONFIRMED or CHECKED_IN tickets (PAID status)
+ * 
+ * ENDPOINT: GET /api/schedules/:scheduleId/booked-seats
+ * 
+ * RESPONSE:
+ * {
+ *   bookedSeats: [1, 4, 10, 15],
+ *   count: 4,
+ *   scheduleId: "uuid"
+ * }
+ */
+const getBookedSeats = async (req, res) => {
+  const { scheduleId } = req.params;
+  
+  try {
+    console.log(`\n🔍 Fetching booked seats for schedule: ${scheduleId}`);
+    
+    // Validate schedule exists
+    const schedule = await Schedule.findByPk(scheduleId);
+    if (!schedule) {
+      console.log(`❌ Schedule not found: ${scheduleId}`);
+      return res.status(404).json({ 
+        error: 'Schedule not found',
+        message: `No schedule found with ID: ${scheduleId}`  
+      });
+    }
+    
+    // Query tickets with CONFIRMED or CHECKED_IN status only (PAID tickets)
+    // PENDING_PAYMENT, CANCELLED, EXPIRED tickets do NOT lock seats
+    const bookedTickets = await Ticket.findAll({
+      where: {
+        schedule_id: scheduleId,
+        status: {
+          [Op.in]: ['CONFIRMED', 'CHECKED_IN']
+        }
+      },
+      attributes: ['seat_number', 'status', 'booking_ref'],
+      order: [['seat_number', 'ASC']]
+    });
+    
+    // Extract seat numbers and convert to integers for proper sorting
+    const bookedSeatNumbers = bookedTickets
+      .map(ticket => {
+        const seatNum = String(ticket.seat_number).trim();
+        const numericValue = parseInt(seatNum);
+        return isNaN(numericValue) ? seatNum : numericValue;
+      })
+      .sort((a, b) => {
+        if (typeof a === 'number' && typeof b === 'number') {
+          return a - b;
+        }
+        return String(a).localeCompare(String(b));
+      });
+    
+    console.log(`✅ Found ${bookedSeatNumbers.length} booked seats`);
+    if (bookedSeatNumbers.length > 0) {
+      console.log(`   Seats: ${bookedSeatNumbers.join(', ')}`);
+    }
+    console.log(`   Ticket statuses:`);
+    const statusCounts = {};
+    bookedTickets.forEach(t => {
+      statusCounts[t.status] = (statusCounts[t.status] || 0) + 1;
+    });
+    Object.entries(statusCounts).forEach(([status, count]) => {
+      console.log(`     ${status}: ${count}`);
+    });
+    
+    res.json({
+      bookedSeats: bookedSeatNumbers,
+      count: bookedSeatNumbers.length,
+      scheduleId: scheduleId,
+      details: bookedTickets.map(t => ({
+        seatNumber: t.seat_number,
+        status: t.status,
+        bookingRef: t.booking_ref
+      }))
+    });
+    
+  } catch (error) {
+    console.error('❌ ERROR in getBookedSeats:');
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Schedule ID:', scheduleId);
+    res.status(500).json({ 
+      error: 'Failed to fetch booked seats',
+      message: error.message 
+    });
   }
 };
 
@@ -699,7 +801,8 @@ const bookSeatsWithConcurrencySafety = async (req, res) => {
 };
 
 module.exports = { 
-  getSeatsForSchedule, 
+  getSeatsForSchedule,
+  getBookedSeats, // NEW: Get only booked seat numbers
   lockSeat, 
   confirmLock, 
   releaseLock, 
