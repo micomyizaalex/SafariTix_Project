@@ -52,8 +52,11 @@ interface BusLocation {
 }
 
 // Mapbox token - replace with your own from https://account.mapbox.com/
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndHRqcmZ3N3gifQ.rJcFIG214AriISLbB6B5aw';
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
+if (!MAPBOX_TOKEN) {
+  throw new Error("VITE_MAPBOX_TOKEN is missing in .env file");
+}
 export default function LiveTracking() {
   const { accessToken } = useAuth();
   const [buses, setBuses] = useState<BusLocation[]>([]);
@@ -122,7 +125,7 @@ export default function LiveTracking() {
           model: loc.bus.model,
           driverName: loc.driver.name,
           currentRoute: 'On Route', // You can add route info later
-          status: loc.trip_status === 'active' ? 'active' : 'idle',
+          status: loc.trip_status === 'in_progress' ? 'active' : 'idle',
           latitude: loc.location.latitude,
           longitude: loc.location.longitude,
           speed: loc.location.speed,

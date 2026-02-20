@@ -325,9 +325,22 @@ const startTrip = async (req, res) => {
 			return res.status(403).json({ error: 'Unauthorized: Schedule belongs to different company' });
 		}
 		
-		// Verify driver is assigned to this schedule
-		if (schedule.driver_id !== req.userId) {
-			return res.status(403).json({ error: 'Unauthorized: You are not the driver for this schedule' });
+		// Verify driver is assigned to the bus for this schedule (via DriverAssignment)
+		const legacyDriver = await Driver.findOne({ where: { user_id: req.userId } });
+		const driverIdCandidates = [req.userId];
+		if (legacyDriver && legacyDriver.id) driverIdCandidates.push(legacyDriver.id);
+		
+		const assignment = await require('../models').DriverAssignment.findOne({
+			where: {
+				driver_id: { [Op.in]: driverIdCandidates },
+				bus_id: schedule.bus_id,
+				unassigned_at: null,
+				company_id: user.company_id
+			}
+		});
+		
+		if (!assignment) {
+			return res.status(403).json({ error: 'Unauthorized: You are not assigned to the bus for this schedule' });
 		}
 		
 		// Verify schedule hasn't already started or completed
@@ -401,9 +414,22 @@ const endTrip = async (req, res) => {
 			return res.status(403).json({ error: 'Unauthorized: Schedule belongs to different company' });
 		}
 		
-		// Verify driver is assigned to this schedule
-		if (schedule.driver_id !== req.userId) {
-			return res.status(403).json({ error: 'Unauthorized: You are not the driver for this schedule' });
+		// Verify driver is assigned to the bus for this schedule (via DriverAssignment)
+		const legacyDriver = await Driver.findOne({ where: { user_id: req.userId } });
+		const driverIdCandidates = [req.userId];
+		if (legacyDriver && legacyDriver.id) driverIdCandidates.push(legacyDriver.id);
+		
+		const assignment = await require('../models').DriverAssignment.findOne({
+			where: {
+				driver_id: { [Op.in]: driverIdCandidates },
+				bus_id: schedule.bus_id,
+				unassigned_at: null,
+				company_id: user.company_id
+			}
+		});
+		
+		if (!assignment) {
+			return res.status(403).json({ error: 'Unauthorized: You are not assigned to the bus for this schedule' });
 		}
 		
 		// Verify trip is actually in progress

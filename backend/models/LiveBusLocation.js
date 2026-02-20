@@ -4,19 +4,15 @@ const sequelize = require("../config/database");
 const LiveBusLocation = sequelize.define(
   "LiveBusLocation",
   {
-    id: {
+    schedule_id: {
       type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
-    },
-    bus_id: {
-      type: DataTypes.UUID,
       allowNull: false,
-      unique: true, // Only one active location per bus
-    },
-    driver_id: {
-      type: DataTypes.UUID,
-      allowNull: false,
+      references: {
+        model: 'schedules',
+        key: 'id'
+      },
+      onDelete: 'CASCADE'
     },
     latitude: {
       type: DataTypes.DECIMAL(10, 8),
@@ -28,31 +24,26 @@ const LiveBusLocation = sequelize.define(
     },
     speed: {
       type: DataTypes.DECIMAL(5, 2),
-      defaultValue: 0,
+      defaultValue: null,
       comment: 'Speed in km/h'
     },
     heading: {
       type: DataTypes.DECIMAL(5, 2),
+      defaultValue: null,
       comment: 'Direction in degrees (0-360)'
     },
-    is_active: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: true,
-    },
-    trip_status: {
-      type: DataTypes.ENUM('active', 'ended', 'paused'),
-      defaultValue: 'active',
-    },
+    recorded_at: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW
+    }
   },
   {
     tableName: "live_bus_locations",
     timestamps: true,
     underscored: true,
     indexes: [
-      { fields: ['bus_id'] },
-      { fields: ['driver_id'] },
-      { fields: ['is_active'] },
-      { fields: ['updated_at'] }
+      { fields: ['recorded_at'] }
     ]
   }
 );

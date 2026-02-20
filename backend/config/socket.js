@@ -181,7 +181,7 @@ function initializeSocket(server) {
            INNER JOIN schedules s ON t.schedule_id = s.id
            WHERE t.id = $1 
              AND t.passenger_id = $2 
-             AND t.status = 'CONFIRMED'
+             AND t.status IN ('paid', 'booked', 'checked_in')
              AND t.schedule_id = $3`,
           [ticketId, socket.userId, scheduleId]
         );
@@ -195,7 +195,7 @@ function initializeSocket(server) {
         const ticket = result.rows[0];
 
         // Only allow tracking if schedule is ACTIVE
-        if (ticket.schedule_status !== 'ACTIVE') {
+        if (ticket.schedule_status !== 'in_progress' && ticket.schedule_status !== 'ACTIVE') {
           socket.emit('error', { message: 'Bus is not currently active for tracking' });
           return;
         }
@@ -222,10 +222,10 @@ function initializeSocket(server) {
           const currentLocation = locationResult.rows[0];
           socket.emit('bus:currentLocation', {
             scheduleId,
-            latitude: currentLocation.latitude,
-            longitude: currentLocation.longitude,
-            speed: currentLocation.speed,
-            heading: currentLocation.heading,
+            latitude: parseFloat(currentLocation.latitude),
+            longitude: parseFloat(currentLocation.longitude),
+            speed: currentLocation.speed ? parseFloat(currentLocation.speed) : null,
+            heading: currentLocation.heading ? parseFloat(currentLocation.heading) : null,
             timestamp: currentLocation.recorded_at,
           });
         }
@@ -238,6 +238,151 @@ function initializeSocket(server) {
 
       } catch (error) {
         console.error('Error in passenger:joinSchedule:', error);
+        socket.emit('error', { message: 'Failed to join tracking' });
+      }
+    });
+
+    // Company Admin joins schedule room to track their company's buses
+    socket.on('companyAdmin:joinSchedule', async (data) => {
+      try {
+        const { scheduleId } = data;
+        console.log(`🏢 Company Admin ${socket.userId} attempting to track schedule ${scheduleId}`);
+
+        // Verify user is company_admin role
+        if (socket.userRole !== 'company_admin' && socket.userRole !== 'company') {
+          socket.emit('error', { message: 'Unauthorized: Company admin access required' });
+          return;
+        }
+
+        // Verify schedule belongs to admin's company
+        const client = await pool.connect();
+        const result = await client.query(
+          `SELECT s.*, u.company_id as admin_company_id
+           FROM schedules s
+           INNER JOIN users u ON u.id = $1
+           WHERE s.id = $2`,
+          [socket.userId, scheduleId]
+        );
+        client.release();
+
+        if (result.rows.length === 0) {
+          socket.emit('error', { message: 'Schedule not found' });
+          return;
+        }
+
+        const schedule = result.rows[0];
+
+        // Verify admin's company owns this schedule
+        if (schedule.company_id !== schedule.admin_company_id) {
+          socket.emit('error', { message: 'Unauthorized: Schedule belongs to different company' });
+          return;
+        }
+
+        // Join the schedule room
+        socket.join(`schedule:${scheduleId}`);
+        socket.currentScheduleId = scheduleId;
+
+        console.log(`✅ Company Admin joined schedule room: schedule:${scheduleId}`);
+
+        // Send current location if available
+        const locationClient = await pool.connect();
+        const locationResult = await locationClient.query(
+          `SELECT latitude, longitude, speed, heading, recorded_at
+           FROM live_bus_locations
+           WHERE schedule_id = $1
+           ORDER BY recorded_at DESC
+           LIMIT 1`,
+          [scheduleId]
+        );
+        locationClient.release();
+
+        if (locationResult.rows.length > 0) {
+          const currentLocation = locationResult.rows[0];
+          socket.emit('bus:currentLocation', {
+            scheduleId,
+            latitude: parseFloat(currentLocation.latitude),
+            longitude: parseFloat(currentLocation.longitude),
+            speed: currentLocation.speed ? parseFloat(currentLocation.speed) : null,
+            heading: currentLocation.heading ? parseFloat(currentLocation.heading) : null,
+            timestamp: currentLocation.recorded_at,
+          });
+        }
+
+        socket.emit('companyAdmin:joinedSchedule', { 
+          scheduleId, 
+          message: 'Successfully joined tracking',
+          hasCurrentLocation: locationResult.rows.length > 0
+        });
+
+      } catch (error) {
+        console.error('Error in companyAdmin:joinSchedule:', error);
+        socket.emit('error', { message: 'Failed to join tracking' });
+      }
+    });
+
+    // Super Admin joins schedule room (can track any schedule)
+    socket.on('admin:joinSchedule', async (data) => {
+      try {
+        const { scheduleId } = data;
+        console.log(`🔐 Super Admin ${socket.userId} attempting to track schedule ${scheduleId}`);
+
+        // Verify user is super admin
+        if (socket.userRole !== 'admin') {
+          socket.emit('error', { message: 'Unauthorized: Super admin access required' });
+          return;
+        }
+
+        // Verify schedule exists
+        const client = await pool.connect();
+        const result = await client.query(
+          `SELECT id, status FROM schedules WHERE id = $1`,
+          [scheduleId]
+        );
+        client.release();
+
+        if (result.rows.length === 0) {
+          socket.emit('error', { message: 'Schedule not found' });
+          return;
+        }
+
+        // Join the schedule room (no further authorization needed for super admin)
+        socket.join(`schedule:${scheduleId}`);
+        socket.currentScheduleId = scheduleId;
+
+        console.log(`✅ Super Admin joined schedule room: schedule:${scheduleId}`);
+
+        // Send current location if available
+        const locationClient = await pool.connect();
+        const locationResult = await locationClient.query(
+          `SELECT latitude, longitude, speed, heading, recorded_at
+           FROM live_bus_locations
+           WHERE schedule_id = $1
+           ORDER BY recorded_at DESC
+           LIMIT 1`,
+          [scheduleId]
+        );
+        locationClient.release();
+
+        if (locationResult.rows.length > 0) {
+          const currentLocation = locationResult.rows[0];
+          socket.emit('bus:currentLocation', {
+            scheduleId,
+            latitude: parseFloat(currentLocation.latitude),
+            longitude: parseFloat(currentLocation.longitude),
+            speed: currentLocation.speed ? parseFloat(currentLocation.speed) : null,
+            heading: currentLocation.heading ? parseFloat(currentLocation.heading) : null,
+            timestamp: currentLocation.recorded_at,
+          });
+        }
+
+        socket.emit('admin:joinedSchedule', { 
+          scheduleId, 
+          message: 'Successfully joined tracking',
+          hasCurrentLocation: locationResult.rows.length > 0
+        });
+
+      } catch (error) {
+        console.error('Error in admin:joinSchedule:', error);
         socket.emit('error', { message: 'Failed to join tracking' });
       }
     });

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import SuccessPopup from '../../components/SuccessPopup';
 import RevenueReports from './RevenueReports';
 import TicketsManagement from './TicketsManagement';
+import CompanyFleetTracking from '../../components/CompanyFleetTracking';
 import {
   LayoutDashboard,
   Bus,
@@ -129,6 +130,7 @@ export default function CompanyDashboard() {
   ]);
   const [recentTickets, setRecentTickets] = React.useState<any[]>([]);
   const [revenueData, setRevenueData] = React.useState<any[]>([]);
+  const [totalActiveTrips, setTotalActiveTrips] = useState(0);
 
   React.useEffect(() => {
     let mounted = true;
@@ -137,84 +139,67 @@ export default function CompanyDashboard() {
 
     async function loadActiveBuses() {
       try {
-        const [bRes, sRes] = await Promise.all([
-          fetch('/api/company/buses', { headers }),
-          fetch('/api/company/schedules', { headers })
-        ]);
+        // Fetch active trips from the new endpoint
+        const activeTripsRes = await fetch('/api/company/active-trips', { headers });
 
         if (!mounted) return;
 
-        const busesJson = bRes.ok ? await bRes.json() : { buses: [] };
-        const schedulesJson = sRes.ok ? await sRes.json() : { schedules: [] };
+        if (activeTripsRes.ok) {
+          const activeTripsData = await activeTripsRes.json();
+          const activeTrips = activeTripsData.activeTrips || [];
+          
+          console.log('Active trips fetched:', activeTrips);
+          const inProgressTrips = activeTrips.filter((trip: any) => trip.status === 'in_progress');
+          setTotalActiveTrips(inProgressTrips.length);
 
-        const buses = busesJson.buses || [];
-        const schedules = schedulesJson.schedules || [];
-
-        // For each active bus, find its next upcoming schedule (today or future)
-        const now = new Date();
-        const byBus = {} as Record<string, any[]>;
-        schedules.forEach((sch: any) => {
-          if (!sch || !sch.bus_id) return;
-          byBus[sch.bus_id] = byBus[sch.bus_id] || [];
-          byBus[sch.bus_id].push(sch);
-        });
-
-        const active = buses
-          .filter((b: any) => String(b.status || '').toLowerCase() === 'active')
-          .map((b: any) => {
-            const busSchedules = byBus[b.id] || [];
-            // choose the nearest future schedule
-            let next = null;
-            const parsedNow = now.getTime();
-            busSchedules.forEach((sch: any) => {
-              try {
-                const dateStr = sch.scheduleDate || sch.date || sch.schedule_date;
-                const timeStr = sch.departureTime || sch.departure_time || sch.time;
-                if (!dateStr || !timeStr) return;
-                const dt = new Date(dateStr + 'T' + timeStr);
-                const diff = dt.getTime() - parsedNow;
-                if (diff >= -1000) { // allow slight past
-                  if (!next || diff < next.diff) next = { sch, dt, diff };
-                }
-              } catch (e) { /* ignore parse errors */ }
-            });
-
-            // compute occupancy and ETA
-            let occupancy = null;
+          // Map active trips to the expected format for the dashboard
+          const active = activeTrips.map((trip: any) => {
+            // Calculate ETA (time since trip started)
             let eta = '—';
-            if (next && next.sch) {
-              const sch = next.sch;
-              const seatsAvailable = sch.seatsAvailable != null ? sch.seatsAvailable : (sch.seats_available ?? null);
-              const totalSeats = sch.totalSeats || sch.total_seats || null;
-              if (totalSeats && seatsAvailable != null && totalSeats > 0) {
-                occupancy = Math.round(((totalSeats - seatsAvailable) / totalSeats) * 100);
-              }
-              if (next.diff != null) {
-                const mins = Math.max(0, Math.round(next.diff / 60000));
-                eta = mins <= 0 ? 'Now' : `${mins} min`;
-              }
+            if (trip.tripStartTime) {
+              const startTime = new Date(trip.tripStartTime).getTime();
+              const now = Date.now();
+              const elapsedMinutes = Math.floor((now - startTime) / 60000);
+              eta = `${elapsedMinutes} min ago`;
             }
 
-            const route = (next && next.sch) ? ((next.sch.routeFrom || '') + ' → ' + (next.sch.routeTo || '')) : (b.route || '—');
+            const route = `${trip.routeFrom} → ${trip.routeTo}`;
 
             return {
-              id: b.plateNumber || b.id || b.plate_number,
-              plate: b.plateNumber || b.plate_number || b.id,
-              driver: b.driverName || (b.driver && (b.driver.full_name || b.driver.name)) || '—',
+              id: trip.busPlate,
+              plate: trip.busPlate,
+              driver: trip.driverName || '—',
               route,
-              occupancy: occupancy != null ? occupancy : '—',
-              eta
+              occupancy: '—', // We don't have this data yet
+              eta,
+              status: 'in_progress'
             };
           });
+          console.log("acctive buses", active)
 
-        setActiveBusesList(active);
+          setActiveBusesList(active);
+        } else {
+          console.warn('Failed to fetch active trips:', activeTripsRes.statusText);
+          setActiveBusesList([]);
+        }
       } catch (err) {
         console.warn('Failed to load active buses', err);
+        setActiveBusesList([]);
       }
     }
 
+    // Load active buses immediately
     loadActiveBuses();
-    return () => { mounted = false; };
+
+    // Poll for updates every 5 seconds
+    const pollInterval = setInterval(() => {
+      loadActiveBuses();
+    }, 5000);
+
+    return () => { 
+      mounted = false; 
+      clearInterval(pollInterval);
+    };
   }, []);
 
   React.useEffect(() => {
@@ -223,25 +208,28 @@ export default function CompanyDashboard() {
 
     async function fetchKpis() {
       try {
-        const [busesRes, driversRes, schedulesRes, ticketsRes] = await Promise.all([
+        const [busesRes, driversRes, schedulesRes, ticketsRes, activeTripsRes] = await Promise.all([
           fetch('/api/company/buses', { headers }),
             fetch('/api/company/drivers', { headers }),
             fetch('/api/company/schedules', { headers }),
-            fetch('/api/company/tickets', { headers })
+            fetch('/api/company/tickets', { headers }),
+            fetch('/api/company/active-trips', { headers })
         ]);
 
         const busesJson = busesRes.ok ? await busesRes.json() : { buses: [] };
         const driversJson = driversRes.ok ? await driversRes.json() : { drivers: [] };
         const schedulesJson = schedulesRes.ok ? await schedulesRes.json() : { schedules: [] };
         const ticketsJson = ticketsRes.ok ? await ticketsRes.json() : { tickets: [] };
+        const activeTripsJson = activeTripsRes.ok ? await activeTripsRes.json() : { activeTrips: [] };
 
         const buses = busesJson.buses || [];
         const drivers = driversJson.drivers || [];
         const schedules = schedulesJson.schedules || [];
         const tickets = ticketsJson.tickets || [];
+        const activeTrips = activeTripsJson.activeTrips || [];
 
         const totalBuses = buses.length;
-        const activeBuses = buses.filter(b => b.status === 'active').length;
+        const activeBuses = activeTrips.length; // Use active trips count instead of bus status
 
         // Count unique routes from schedules
         const routeSet = new Set();
@@ -487,7 +475,7 @@ export default function CompanyDashboard() {
           {activeSection === 'schedules' && <SchedulesSection />}
           {activeSection === 'tickets' && <TicketsManagement />}
           {activeSection === 'revenue' && <RevenueReports />}
-          {activeSection === 'tracking' && <TrackingSection />}
+          {activeSection === 'tracking' && <TrackingSection totalActiveTrips={totalActiveTrips} />}
           {activeSection === 'settings' && <SettingsSection />}
         </main>
       </div>
@@ -1138,13 +1126,9 @@ function SchedulesSection() {
   );
 }
 
-function TrackingSection() {
-  return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm">
-      <h2 className="text-2xl font-['Montserrat'] font-bold text-[#2B2D42] mb-4">Live Fleet Tracking</h2>
-      <p className="text-gray-600">Live tracking map interface coming soon...</p>
-    </div>
-  );
+function TrackingSection({totalActiveTrips}: { totalActiveTrips: number  }) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  return <CompanyFleetTracking token={token} activeBuses={totalActiveTrips} />;
 }
 
 function SettingsSection() {

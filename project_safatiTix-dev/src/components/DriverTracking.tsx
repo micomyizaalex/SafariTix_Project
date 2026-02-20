@@ -51,7 +51,7 @@ const DriverTracking: React.FC<DriverTrackingProps> = ({
   // Auto-reconnect if already active
   useEffect(() => {
     if (tripStatus === 'ACTIVE') {
-      const accessToken = localStorage.getItem('accessToken');
+      const accessToken = localStorage.getItem('token');
       if (accessToken) {
         initializeSocket(accessToken);
         startLocationTracking();
@@ -77,7 +77,7 @@ const DriverTracking: React.FC<DriverTrackingProps> = ({
       setError(null);
 
       // Call API to update schedule status to ACTIVE (in_progress)
-      const accessToken = localStorage.getItem('accessToken');
+      const accessToken = localStorage.getItem('token');
       if (!accessToken) {
         throw new Error('Authentication required');
       }
@@ -133,7 +133,7 @@ const DriverTracking: React.FC<DriverTrackingProps> = ({
       }
 
       // Call API to update schedule status to COMPLETED
-      const accessToken = localStorage.getItem('accessToken');
+      const accessToken = localStorage.getItem('token');
       if (!accessToken) {
         throw new Error('Authentication required');
       }
@@ -164,7 +164,7 @@ const DriverTracking: React.FC<DriverTrackingProps> = ({
       console.error('❌ Error ending trip:', err);
       
       // Restore connection on error
-      const accessToken = localStorage.getItem('accessToken');
+      const accessToken = localStorage.getItem('token');
       if (accessToken) {
         initializeSocket(accessToken);
         startLocationTracking();

@@ -1220,12 +1220,23 @@ const getDashboardStats = async (req, res) => {
       };
     }
 
+    // Get active trips count (schedules with status 'in_progress')
+    const activeTripsCount = await Schedule.count({
+      where: {
+        company_id: companyId,
+        status: 'in_progress'
+      }
+    });
+
+    console.log('Active trips count:', activeTripsCount);
+
     const responseData = {
       balance: Math.round(totalRevenue),
       sales: Math.round(last30DaysRevenue),
       totalProfit: Math.round(totalRevenue),
       balanceGrowth: parseFloat(revenueGrowth),
       salesGrowth: parseFloat(salesCountGrowth),
+      activeTrips: activeTripsCount,
       weekData,
       recentSales,
       lastOrders: topOrders,
@@ -1237,6 +1248,110 @@ const getDashboardStats = async (req, res) => {
 
   } catch (error) {
     console.error('getDashboardStats error:', error);
+    res.status(400).json({ error: error.message });
+  }
+};
+
+const getActiveTrips = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const companyId = req.companyId || (await User.findByPk(userId)).company_id;
+    
+    if (!companyId) {
+      return res.json({ activeTrips: [] });
+    }
+
+    // Fetch all schedules with status 'in_progress' for this company
+    const activeSchedules = await Schedule.findAll({
+      where: {
+        company_id: companyId,
+        status: 'in_progress'
+      },
+      include: [
+        {
+          model: Route,
+          attributes: ['origin', 'destination'],
+          required: false
+        },
+        {
+          model: Bus,
+          attributes: ['id', 'plate_number'],
+          required: false
+        }
+      ],
+      order: [['trip_start_time', 'DESC']]
+    });
+
+    // Get driver names for each schedule
+    const busIds = activeSchedules.map(s => s.bus_id).filter(Boolean);
+    let driversByBusId = {};
+    
+    if (busIds.length > 0) {
+      const DriverAssignment = require('../models').DriverAssignment;
+      const assignments = await DriverAssignment.findAll({
+        where: {
+          bus_id: busIds,
+          company_id: companyId,
+          unassigned_at: null
+        },
+        include: [{
+          model: require('../models').Driver,
+          required: false
+        }]
+      });
+
+      // Get user info for drivers
+      const userIds = new Set();
+      assignments.forEach(a => {
+        if (a.Driver && a.Driver.user_id) userIds.add(a.Driver.user_id);
+        if (a.driver_id && a.driver_id.length === 36) userIds.add(a.driver_id);
+      });
+
+      const users = await User.findAll({
+        where: { id: Array.from(userIds) },
+        attributes: ['id', 'full_name']
+      });
+      
+      const usersById = {};
+      users.forEach(u => { usersById[u.id] = u; });
+
+      // Map bus_id to driver name
+      assignments.forEach(a => {
+        if (!a.bus_id) return;
+        const drv = a.Driver;
+        let driverName = null;
+        if (drv && drv.user_id && usersById[drv.user_id]) {
+          driverName = usersById[drv.user_id].full_name;
+        } else if (a.driver_id && usersById[a.driver_id]) {
+          driverName = usersById[a.driver_id].full_name;
+        } else if (drv && drv.name) {
+          driverName = drv.name;
+        }
+        if (driverName) {
+          driversByBusId[a.bus_id] = driverName;
+        }
+      });
+    }
+
+    const activeTrips = activeSchedules.map(schedule => {
+      return {
+        id: schedule.id,
+        scheduleId: schedule.id,
+        busPlate: schedule.Bus?.plate_number || 'Unknown',
+        driverName: driversByBusId[schedule.bus_id] || null,
+        routeFrom: schedule.Route?.origin || 'N/A',
+        routeTo: schedule.Route?.destination || 'N/A',
+        departureTime: schedule.departure_time,
+        tripStartTime: schedule.trip_start_time,
+        status: schedule.status
+      };
+    });
+
+    console.log(`Returning ${activeTrips.length} active trips for company ${companyId}`);
+    res.json({ activeTrips });
+
+  } catch (error) {
+    console.error('Error fetching active trips:', error);
     res.status(400).json({ error: error.message });
   }
 };
@@ -1423,6 +1538,7 @@ module.exports = {
   reopenScheduleTickets,
   getScheduleJournals,
   getDashboardStats,
+  getActiveTrips,
   getRevenue
 };
 

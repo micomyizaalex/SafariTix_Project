@@ -300,10 +300,117 @@ const getTripStatus = async (req, res) => {
   }
 };
 
+/**
+ * Get current location for a specific schedule
+ * GET /api/tracking/schedule/:scheduleId/location
+ * Accessible by: passengers with tickets, company admins, super admins
+ */
+const getScheduleLocation = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const userRole = req.userRole;
+    const { scheduleId } = req.params;
+
+    if (!scheduleId) {
+      return res.status(400).json({ error: 'scheduleId is required' });
+    }
+
+    // Verify schedule exists
+    const schedule = await Schedule.findByPk(scheduleId, {
+      attributes: ['id', 'company_id', 'status', 'schedule_date', 'departure_time']
+    });
+
+    if (!schedule) {
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+
+    // Authorization check based on role
+    let authorized = false;
+
+    if (userRole === 'admin') {
+      // Super admin can access any schedule
+      authorized = true;
+    } else if (userRole === 'company_admin' || userRole === 'company') {
+      // Company admin can access their company's schedules
+      const user = await User.findByPk(userId, { attributes: ['company_id'] });
+      if (user && user.company_id === schedule.company_id) {
+        authorized = true;
+      }
+    } else if (userRole === 'commuter') {
+      // Commuter must have a paid ticket for this schedule
+      const pool = require('../config/pgPool');
+      const client = await pool.connect();
+      try {
+        const ticketResult = await client.query(
+          `SELECT id FROM tickets 
+           WHERE schedule_id = $1 
+             AND passenger_id = $2 
+             AND status IN ('paid', 'booked', 'checked_in')
+           LIMIT 1`,
+          [scheduleId, userId]
+        );
+        if (ticketResult.rows.length > 0) {
+          authorized = true;
+        }
+      } finally {
+        client.release();
+      }
+    }
+
+    if (!authorized) {
+      return res.status(403).json({ error: 'Unauthorized: You do not have access to this schedule' });
+    }
+
+    // Fetch latest location
+    const pool = require('../config/pgPool');
+    const client = await pool.connect();
+    try {
+      const locationResult = await client.query(
+        `SELECT schedule_id, latitude, longitude, speed, heading, recorded_at
+         FROM live_bus_locations
+         WHERE schedule_id = $1
+         ORDER BY recorded_at DESC
+         LIMIT 1`,
+        [scheduleId]
+      );
+
+      if (locationResult.rows.length === 0) {
+        return res.json({
+          success: true,
+          hasLocation: false,
+          message: 'No location data available yet'
+        });
+      }
+
+      const location = locationResult.rows[0];
+      
+      res.json({
+        success: true,
+        hasLocation: true,
+        location: {
+          scheduleId: location.schedule_id,
+          latitude: parseFloat(location.latitude),
+          longitude: parseFloat(location.longitude),
+          speed: location.speed ? parseFloat(location.speed) : null,
+          heading: location.heading ? parseFloat(location.heading) : null,
+          timestamp: location.recorded_at
+        }
+      });
+    } finally {
+      client.release();
+    }
+
+  } catch (error) {
+    console.error('Error getting schedule location:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   updateDriverLocation,
   startTrip,
   endTrip,
   getLiveLocations,
-  getTripStatus
+  getTripStatus,
+  getScheduleLocation
 };

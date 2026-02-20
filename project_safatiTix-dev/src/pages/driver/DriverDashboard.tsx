@@ -286,10 +286,10 @@ export default function DriverDashboard() {
       {/* ========== MAIN CONTENT ========== */}
       <main className="lg:ml-64 pt-16 lg:pt-0 min-h-screen">
         <div className="p-4 lg:p-6 xl:p-8">
-          {activeView === 'dashboard' && <DashboardView setShowScanner={setShowScanner} driverName={driverName} schedules={schedules} user={user} activeTrip={activeTrip} upcomingTrips={upcomingTrips} dashboardStats={dashboardStats} recentPassengers={recentPassengersState} />}
-          {activeView === 'trips' && <TripsView trips={trips} loading={tripsLoading} error={tripsError} />}
+          {activeView === 'dashboard' && <DashboardView setShowScanner={setShowScanner} driverName={driverName} schedules={schedules} user={user} activeTrip={activeTrip} upcomingTrips={upcomingTrips} dashboardStats={dashboardStats} recentPassengers={recentPassengersState} onStartTrip={handleStartTrip} />}
+          {activeView === 'trips' && <TripsView trips={trips} loading={tripsLoading} error={tripsError} onStartTrip={handleStartTrip} />}
           {activeView === 'passengers' && <PassengersView setShowScanner={setShowScanner} />}
-          {activeView === 'tracking' && <TrackingView />}
+          {activeView === 'tracking' && <TrackingView schedule={selectedScheduleForTracking} onTripStarted={handleTripStarted} onTripEnded={handleTripEnded} />}
           {activeView === 'profile' && <ProfileView />}
         </div>
       </main>
@@ -301,7 +301,7 @@ export default function DriverDashboard() {
 }
 
 // ==================== DASHBOARD VIEW ====================
-function DashboardView({ setShowScanner, driverName, schedules, user, activeTrip, upcomingTrips, dashboardStats, recentPassengers }: { setShowScanner: any, driverName: any, schedules: any[], user: any, activeTrip: any, upcomingTrips: any[], dashboardStats: any, recentPassengers: any[] }) {
+function DashboardView({ setShowScanner, driverName, schedules, user, activeTrip, upcomingTrips, dashboardStats, recentPassengers, onStartTrip }: { setShowScanner: any, driverName: any, schedules: any[], user: any, activeTrip: any, upcomingTrips: any[], dashboardStats: any, recentPassengers: any[], onStartTrip?: (schedule: any) => void }) {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       

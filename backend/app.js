@@ -50,17 +50,37 @@ app.use("/api",routes)
 
 const connectDatabase = async () => {
   try {
-    await sequelize.authenticate();
-    console.log(' Database connected successfully');
-    // Skip sync to avoid hanging - run sync-schema.js separately
-    // if (process.env.NODE_ENV === 'development') {
-    //   await sequelize.sync({alter: true});
-    //   console.log(' Database models synchronized');
-    // }
+    console.log(' Connecting to database...');
+    
+    // Custom retry logic with better timeout handling
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    while (attempts < maxAttempts) {
+      try {
+        attempts++;
+        console.log(` Attempt ${attempts}/${maxAttempts}...`);
+        
+        // Use query instead of authenticate for better control
+        await sequelize.query('SELECT 1');
+        console.log(' Database connected successfully');
+        
+        return true;
+      } catch (error) {
+        console.error(` Attempt ${attempts} failed:`, error.message);
+        
+        if (attempts >= maxAttempts) {
+          throw error;
+        }
+        
+        // Wait 2 seconds before retry
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
     
     return true;
   } catch (error) {
-    console.error(' Database connection failed:', error);
+    console.error(' Database connection failed after all attempts:', error);
     process.exit(1);
   }
 };
