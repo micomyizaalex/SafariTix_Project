@@ -16,8 +16,8 @@ const Schedule = sequelize.define(
     company_id: { type: DataTypes.UUID, allowNull: false },
 
     schedule_date: { type: DataTypes.DATEONLY, allowNull: false },
-    departure_time: { type: DataTypes.DATE, allowNull: false },
-    arrival_time: { type: DataTypes.DATE, allowNull: false },
+    departure_time: { type: DataTypes.TIME, allowNull: false }, // TIME WITHOUT TIME ZONE
+    arrival_time: { type: DataTypes.TIME, allowNull: false },   // TIME WITHOUT TIME ZONE
     price_per_seat: { type: DataTypes.DECIMAL, allowNull: false },
     total_seats: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 30 },
     available_seats: { type: DataTypes.INTEGER, allowNull: false },

@@ -44,8 +44,36 @@ function initializeSocket(server) {
   });
 
   // Connection handler
-  io.on('connection', (socket) => {
+  io.on('connection', async (socket) => {
     console.log(`🔌 New socket connection: ${socket.id} (User: ${socket.userId})`);
+
+    // Automatically join user to their personal room for real-time updates
+    socket.join(`user:${socket.userId}`);
+    console.log(`👤 User ${socket.userId} joined personal room: user:${socket.userId}`);
+
+    // If user is a company admin or driver, join their company room
+    try {
+      const client = await pool.connect();
+      
+      // Check if user has a company (driver or company admin)
+      const companyQuery = await client.query(
+        `SELECT company_id FROM drivers WHERE user_id = $1
+         UNION
+         SELECT id as company_id FROM companies WHERE owner_id = $1`,
+        [socket.userId]
+      );
+      
+      if (companyQuery.rowCount > 0) {
+        const companyId = companyQuery.rows[0].company_id;
+        socket.join(`company:${companyId}`);
+        socket.companyId = companyId;
+        console.log(`🏢 User ${socket.userId} joined company room: company:${companyId}`);
+      }
+      
+      client.release();
+    } catch (error) {
+      console.error('Error setting up user rooms:', error);
+    }
 
     // Driver joins schedule room to broadcast location
     socket.on('driver:joinSchedule', async (data) => {
