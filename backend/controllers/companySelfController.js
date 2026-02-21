@@ -841,8 +841,8 @@ const createSchedule = async (req, res) => {
       driver_id: driverId || null,
       company_id: companyId,
       schedule_date: date,
-      departure_time: new Date(`${date}T${departureTime}`),
-      arrival_time: new Date(`${date}T${arrivalTime}`),
+      departure_time: departureTime, // Store as time string (HH:MM or HH:MM:SS)
+      arrival_time: arrivalTime,     // Store as time string (HH:MM or HH:MM:SS)
       price_per_seat: parseFloat(price),
       available_seats: bus.capacity,
       status: 'scheduled',
