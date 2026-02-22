@@ -19,4 +19,5 @@ Thumbs.db
 dist/
 build/
 
-.sh
+*.sh
+smart-commit.sh
