@@ -8,7 +8,6 @@ import { useState, CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { Bus, AlertCircle, Eye, EyeOff, TrendingUp, MapPin, Users, Check, ArrowLeft } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
-import { useAuth } from './AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { getHomePath } from './RouteGuards';
 
