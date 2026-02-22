@@ -1,383 +1,155 @@
-import React, { useState, CSSProperties } from 'react';
-import { Bus, ChevronDown, Menu, X, HelpCircle, Headphones, User } from 'lucide-react';
+// pages/public/header.tsx
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Bus, ChevronDown, Menu, X, HelpCircle, Headphones, User, LogIn, UserPlus } from 'lucide-react';
 
-interface HeaderProps {
-  onLoginClick?: () => void;
-  onSignupClick?: () => void;
-}
-
-export function Header({ onLoginClick = () => {}, onSignupClick = () => {} }: HeaderProps) {
+export function Header() {
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
 
   const navItems = [
-    { label: 'Home', href: '#' },
+    { label: 'Home', to: '/' },
     { 
       label: 'Why SafariTix', 
-      href: '#why',
+      to: '#why',
       dropdown: [
-        { label: 'For Commuters', href: '#commuters' },
-        { label: 'For Transport Companies', href: '#companies' },
-        { label: 'For Drivers', href: '#drivers' }
+        { label: 'For Commuters', to: '/commuters' },
+        { label: 'For Transport Companies', to: '/companies' },
+        { label: 'For Drivers', to: '/drivers' }
       ]
     },
     { 
       label: 'Solutions', 
-      href: '#solutions',
+      to: '#solutions',
       dropdown: [
-        { label: 'Bus Tracking', href: '#tracking' },
-        { label: 'Ticketing System', href: '#ticketing' },
-        { label: 'Subscription Management', href: '#subscriptions' },
-        { label: 'Driver App', href: '#driver-app' },
-        { label: 'Company Dashboard', href: '#dashboard' }
+        { label: 'Bus Tracking', to: '/solutions/tracking' },
+        { label: 'Ticketing System', to: '/solutions/ticketing' },
+        { label: 'Subscription Management', to: '/solutions/subscriptions' },
+        { label: 'Driver App', to: '/solutions/driver-app' },
+        { label: 'Company Dashboard', to: '/solutions/dashboard' }
       ]
     },
     { 
       label: 'Resources', 
-      href: '#resources',
+      to: '#resources',
       dropdown: [
-        { label: 'Documentation', href: '#docs' },
-        { label: 'Blog', href: '#blog' },
-        { label: 'Help Center', href: '#help' },
-        { label: 'API Reference', href: '#api' }
+        { label: 'Documentation', to: '/docs' },
+        { label: 'Blog', to: '/blog' },
+        { label: 'Help Center', to: '/help' },
+        { label: 'API Reference', to: '/developers' }
       ]
     },
-    { label: 'Pricing', href: '#pricing' },
+    { label: 'Pricing', to: '/pricing' },
   ];
 
-  const styles: Record<string, CSSProperties> = {
-    header: {
-      position: 'sticky' as const,
-      top: 0,
-      zIndex: 1000,
-      width: '100%',
-      background: 'white',
-      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
-    },
-    topBar: {
-      background: '#2B2D42',
-      color: 'white',
-      padding: '8px 0',
-      fontSize: '0.875rem',
-    },
-    topBarContainer: {
-      maxWidth: '1440px',
-      margin: '0 auto',
-      padding: '0 24px',
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    topBarItem: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-      color: 'rgba(255, 255, 255, 0.9)',
-    },
-    topBarRight: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '24px',
-    },
-    topBarLink: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '6px',
-      color: 'rgba(255, 255, 255, 0.9)',
-      textDecoration: 'none',
-      fontSize: '0.875rem',
-      transition: 'color 0.2s',
-      cursor: 'pointer',
-    },
-    mainNav: {
-      background: 'white',
-      borderBottom: '1px solid #e5e7eb',
-    },
-    navContainer: {
-      maxWidth: '1440px',
-      margin: '0 auto',
-      padding: '0 24px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      height: '80px',
-    },
-    logo: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px',
-      textDecoration: 'none',
-    },
-    logoText: {
-      fontSize: '1.5rem',
-      fontWeight: 'bold',
-      color: '#2B2D42',
-      fontFamily: 'Montserrat, sans-serif',
-    },
-    navLinks: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '32px',
-      flex: 1,
-      justifyContent: 'center',
-    },
-    navItem: {
-      position: 'relative' as const,
-    },
-    navLink: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '4px',
-      color: '#4b5563',
-      textDecoration: 'none',
-      fontSize: '0.9375rem',
-      fontWeight: '500',
-      transition: 'color 0.2s',
-      cursor: 'pointer',
-      padding: '8px 0',
-      background: 'transparent',
-      border: 'none',
-    },
-    dropdown: {
-      position: 'absolute' as const,
-      top: '100%',
-      left: '0',
-      marginTop: '8px',
-      background: 'white',
-      borderRadius: '8px',
-      boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
-      minWidth: '220px',
-      padding: '8px',
-      zIndex: 1000,
-    },
-    dropdownItem: {
-      display: 'block',
-      padding: '10px 16px',
-      color: '#4b5563',
-      textDecoration: 'none',
-      fontSize: '0.875rem',
-      borderRadius: '6px',
-      transition: 'all 0.2s',
-      cursor: 'pointer',
-    },
-    navRight: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '16px',
-    },
-    searchContainer: {
-      position: 'relative' as const,
-      display: 'flex',
-      alignItems: 'center',
-    },
-    searchInput: {
-      padding: '8px 16px 8px 40px',
-      border: '1px solid #e5e7eb',
-      borderRadius: '8px',
-      fontSize: '0.875rem',
-      width: '200px',
-      outline: 'none',
-      transition: 'all 0.2s',
-    },
-    searchIcon: {
-      position: 'absolute' as const,
-      left: '12px',
-      color: '#9ca3af',
-      pointerEvents: 'none' as const,
-    },
-    loginBtn: {
-      background: 'transparent',
-      border: 'none',
-      color: '#4b5563',
-      fontSize: '0.9375rem',
-      fontWeight: '500',
-      cursor: 'pointer',
-      padding: '8px 16px',
-      transition: 'color 0.2s',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '6px',
-    },
-    getQuoteBtn: {
-      background: '#F4A261',
-      color: '#2B2D42',
-      border: 'none',
-      borderRadius: '8px',
-      padding: '10px 24px',
-      fontSize: '0.9375rem',
-      fontWeight: '600',
-      cursor: 'pointer',
-      transition: 'all 0.2s',
-      boxShadow: '0 2px 4px rgba(244, 162, 97, 0.3)',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-    },
-    mobileMenuBtn: {
-      background: 'transparent',
-      border: 'none',
-      color: '#4b5563',
-      cursor: 'pointer',
-      padding: '8px',
-      display: 'none',
-    },
-    mobileMenu: {
-      background: 'white',
-      borderBottom: '1px solid #e5e7eb',
-      padding: '16px 24px',
-    },
-    mobileMenuItem: {
-      padding: '12px 0',
-      borderBottom: '1px solid #f3f4f6',
-    },
-    mobileMenuLink: {
-      display: 'block',
-      color: '#4b5563',
-      textDecoration: 'none',
-      fontSize: '0.9375rem',
-      fontWeight: '500',
-    },
-    mobileSubMenu: {
-      marginTop: '8px',
-      marginLeft: '16px',
-    },
-    mobileSubMenuItem: {
-      padding: '8px 0',
-    },
-    mobileSubMenuLink: {
-      color: '#6b7280',
-      fontSize: '0.875rem',
-      textDecoration: 'none',
-      display: 'block',
-    },
-    mobileButtons: {
-      marginTop: '16px',
-      paddingTop: '16px',
-      borderTop: '1px solid #e5e7eb',
-      display: 'flex',
-      flexDirection: 'column' as const,
-      gap: '8px',
-    },
-  };
-
   return (
-    <header style={styles.header}>
+    <header className="sticky top-0 z-50 w-full bg-white shadow-sm">
       {/* Top Bar */}
-      <div style={styles.topBar}>
-        <div style={styles.topBarContainer}>
-          <div style={styles.topBarItem}>
+      <div className="bg-[#2B2D42] text-white py-2 text-sm">
+        <div className="max-w-7xl mx-auto px-6 flex justify-between items-center">
+          <div className="flex items-center gap-2">
             <span>📍</span>
             <span>Kigali, Rwanda</span>
           </div>
-          <div style={{ ...styles.topBarRight, display: window.innerWidth >= 768 ? 'flex' : 'none' }}>
-            <a
-              href="#faq"
-              style={styles.topBarLink}
-              onMouseEnter={(e) => e.currentTarget.style.color = '#F4A261'}
-              onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)'}
+          <div className="hidden md:flex items-center gap-6">
+            <Link
+              to="/faq"
+              className="flex items-center gap-1.5 text-white/90 hover:text-[#F4A261] transition-colors"
             >
-              <HelpCircle style={{ width: '16px', height: '16px' }} />
+              <HelpCircle className="w-4 h-4" />
               <span>FAQ</span>
-            </a>
-            <a
-              href="#support"
-              style={styles.topBarLink}
-              onMouseEnter={(e) => e.currentTarget.style.color = '#F4A261'}
-              onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)'}
+            </Link>
+            <Link
+              to="/support"
+              className="flex items-center gap-1.5 text-white/90 hover:text-[#F4A261] transition-colors"
             >
-              <Headphones style={{ width: '16px', height: '16px' }} />
+              <Headphones className="w-4 h-4" />
               <span>Support</span>
-            </a>
-            <button
-              onClick={onLoginClick}
-              style={{ ...styles.topBarLink, color: '#0077B6', fontWeight: '600' }}
-              onMouseEnter={(e) => e.currentTarget.style.color = '#F4A261'}
-              onMouseLeave={(e) => e.currentTarget.style.color = '#0077B6'}
-            >
-              <User style={{ width: '16px', height: '16px' }} />
-              <span>Sign In / Register</span>
-            </button>
+            </Link>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => navigate('/login')}
+                className="flex items-center gap-1.5 cursor-pointer text-[#0077B6] font-semibold hover:text-[#F4A261] transition-colors"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>Sign In</span>
+              </button>
+              <span className="text-white/30">|</span>
+              <button
+                onClick={() => navigate('/signup')}
+                className="flex items-center cursor-pointer gap-1.5 text-[#0077B6] font-semibold hover:text-[#F4A261] transition-colors"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Register</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Main Navigation */}
-      <nav style={styles.mainNav}>
-        <div style={styles.navContainer}>
+      <nav className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-20">
           {/* Logo */}
-          <a href="#" style={styles.logo}>
-            <Bus style={{ width: '36px', height: '36px', color: '#0077B6' }} />
+          <Link to="/" className="flex items-center gap-3">
+            <Bus className="w-9 h-9 text-[#0077B6]" />
             <div>
-              <div style={styles.logoText}>SAFARITIX</div>
-              <div style={{ fontSize: '0.625rem', color: '#6b7280', letterSpacing: '0.05em' }}>
-                WE ARE PROFESSIONAL
-              </div>
+              <div className="text-2xl font-bold text-[#2B2D42] font-montserrat">SAFARITIX</div>
+              <div className="text-[0.625rem] text-gray-500 tracking-wider">WE ARE PROFESSIONAL</div>
             </div>
-          </a>
+          </Link>
 
           {/* Desktop Navigation */}
-          <div style={{ ...styles.navLinks, display: window.innerWidth >= 1024 ? 'flex' : 'none' }}>
+          <div className="hidden lg:flex items-center gap-8 flex-1 justify-center">
             {navItems.map((item) => (
               <div
                 key={item.label}
-                style={styles.navItem}
+                className="relative"
                 onMouseEnter={() => item.dropdown && setActiveDropdown(item.label)}
                 onMouseLeave={() => setActiveDropdown(null)}
               >
                 {item.dropdown ? (
                   <>
                     <button
-                      style={styles.navLink}
-                      onMouseEnter={(e) => e.currentTarget.style.color = '#0077B6'}
-                      onMouseLeave={(e) => e.currentTarget.style.color = '#4b5563'}
+                      className="flex items-center gap-1 text-gray-600 hover:text-[#0077B6] font-medium text-sm py-2"
                     >
                       <span>{item.label}</span>
-                      <ChevronDown style={{ width: '16px', height: '16px' }} />
+                      <ChevronDown className="w-4 h-4" />
                     </button>
                     {activeDropdown === item.label && (
-                      <div style={styles.dropdown}>
+                      <div className="absolute top-full left-0 mt-2 bg-white rounded-lg shadow-xl min-w-[220px] py-2 z-50">
                         {item.dropdown.map((subItem) => (
-                          <a
+                          <Link
                             key={subItem.label}
-                            href={subItem.href}
-                            style={styles.dropdownItem}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = '#F5F7FA';
-                              e.currentTarget.style.color = '#0077B6';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = 'transparent';
-                              e.currentTarget.style.color = '#4b5563';
-                            }}
+                            to={subItem.to}
+                            className="block px-4 py-2 text-sm text-gray-600 hover:bg-[#F5F7FA] hover:text-[#0077B6] transition-colors"
+                            onClick={() => setActiveDropdown(null)}
                           >
                             {subItem.label}
-                          </a>
+                          </Link>
                         ))}
                       </div>
                     )}
                   </>
                 ) : (
-                  <a
-                    href={item.href}
-                    style={styles.navLink}
-                    onMouseEnter={(e) => e.currentTarget.style.color = '#0077B6'}
-                    onMouseLeave={(e) => e.currentTarget.style.color = '#4b5563'}
+                  <Link
+                    to={item.to}
+                    className="text-gray-600 hover:text-[#0077B6] font-medium text-sm py-2 inline-block"
                   >
                     {item.label}
-                  </a>
+                  </Link>
                 )}
               </div>
             ))}
           </div>
 
           {/* Right Side */}
-          <div style={{ ...styles.navRight, display: window.innerWidth >= 1024 ? 'flex' : 'none' }}>
+          <div className="hidden lg:flex items-center gap-4">
             {/* Search */}
-            <div style={styles.searchContainer}>
+            <div className="relative">
               <svg
-                style={styles.searchIcon}
-                width="16"
-                height="16"
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -389,32 +161,14 @@ export function Header({ onLoginClick = () => {}, onSignupClick = () => {} }: He
               <input
                 type="text"
                 placeholder="Search Services..."
-                style={styles.searchInput}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = '#0077B6';
-                  e.currentTarget.style.boxShadow = '0 0 0 3px rgba(0, 119, 182, 0.1)';
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = '#e5e7eb';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
+                className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:border-[#0077B6] focus:outline-none focus:ring-1 focus:ring-[#0077B6] w-48"
               />
             </div>
 
             {/* Get A Quote Button */}
             <button
-              onClick={onSignupClick}
-              style={styles.getQuoteBtn}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#E76F51';
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 4px 8px rgba(244, 162, 97, 0.4)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#F4A261';
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 2px 4px rgba(244, 162, 97, 0.3)';
-              }}
+              onClick={() => navigate('/app/signup')}
+              className="bg-[#F4A261] text-[#2B2D42] border-none rounded-lg px-6 py-2.5 text-sm font-semibold shadow-md hover:bg-[#E76F51] hover:-translate-y-0.5 transition-all duration-200 flex items-center gap-2"
             >
               <span>Get A Quote</span>
               <span>→</span>
@@ -423,83 +177,77 @@ export function Header({ onLoginClick = () => {}, onSignupClick = () => {} }: He
 
           {/* Mobile Menu Button */}
           <button
-            style={{
-              ...styles.mobileMenuBtn,
-              display: window.innerWidth >= 1024 ? 'none' : 'block',
-            }}
+            className="lg:hidden p-2 text-gray-600 hover:text-[#0077B6]"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           >
-            {mobileMenuOpen ? (
-              <X style={{ width: '24px', height: '24px' }} />
-            ) : (
-              <Menu style={{ width: '24px', height: '24px' }} />
-            )}
+            {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
         </div>
       </nav>
 
       {/* Mobile Menu */}
       {mobileMenuOpen && (
-        <div style={styles.mobileMenu}>
+        <div className="lg:hidden bg-white border-b border-gray-200 px-6 py-4">
           {navItems.map((item) => (
-            <div key={item.label} style={styles.mobileMenuItem}>
+            <div key={item.label} className="py-3 border-b border-gray-100 last:border-0">
               {item.dropdown ? (
                 <>
-                  <div style={styles.mobileMenuLink}>{item.label}</div>
-                  <div style={styles.mobileSubMenu}>
+                  <div className="text-gray-600 font-medium text-sm mb-2">{item.label}</div>
+                  <div className="ml-4 space-y-2">
                     {item.dropdown.map((subItem) => (
-                      <div key={subItem.label} style={styles.mobileSubMenuItem}>
-                        <a
-                          href={subItem.href}
-                          style={styles.mobileSubMenuLink}
-                          onClick={() => setMobileMenuOpen(false)}
-                        >
-                          {subItem.label}
-                        </a>
-                      </div>
+                      <Link
+                        key={subItem.label}
+                        to={subItem.to}
+                        className="block text-sm text-gray-500 hover:text-[#0077B6]"
+                        onClick={() => setMobileMenuOpen(false)}
+                      >
+                        {subItem.label}
+                      </Link>
                     ))}
                   </div>
                 </>
               ) : (
-                <a
-                  href={item.href}
-                  style={styles.mobileMenuLink}
+                <Link
+                  to={item.to}
+                  className="text-gray-600 hover:text-[#0077B6] font-medium text-sm"
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   {item.label}
-                </a>
+                </Link>
               )}
             </div>
           ))}
 
-          <div style={styles.mobileButtons}>
+          <div className="mt-4 space-y-3">
             <button
               onClick={() => {
-                onLoginClick();
+                navigate('/app/login');
                 setMobileMenuOpen(false);
               }}
-              style={{
-                ...styles.loginBtn,
-                justifyContent: 'center',
-                width: '100%',
-                color: '#0077B6',
-                fontWeight: '600',
-              }}
+              className="w-full flex items-center justify-center gap-2 bg-[#0077B6] text-white font-semibold py-2 rounded-lg hover:bg-[#005a8c] transition-colors"
             >
-              Sign In / Register
+              <LogIn className="w-4 h-4" />
+              Sign In
             </button>
             <button
               onClick={() => {
-                onSignupClick();
+                navigate('/app/signup');
                 setMobileMenuOpen(false);
               }}
-              style={{
-                ...styles.getQuoteBtn,
-                justifyContent: 'center',
-                width: '100%',
-              }}
+              className="w-full flex items-center justify-center gap-2 border-2 border-[#0077B6] text-[#0077B6] font-semibold py-2 rounded-lg hover:bg-[#0077B6] hover:text-white transition-colors"
             >
-              Get A Quote →
+              <UserPlus className="w-4 h-4" />
+              Register
+            </button>
+            <button
+              onClick={() => {
+                navigate('/app/signup');
+                setMobileMenuOpen(false);
+              }}
+              className="w-full bg-[#F4A261] text-[#2B2D42] rounded-lg px-4 py-2 font-semibold hover:bg-[#E76F51] transition-colors flex items-center justify-center gap-2"
+            >
+              <span>Get A Quote</span>
+              <span>→</span>
             </button>
           </div>
         </div>
