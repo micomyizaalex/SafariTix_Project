@@ -1,6 +1,11 @@
-import React, { useState } from 'react';
-import { useAuth } from '../../components/AuthContext';
+// pages/company/CompanyDashboard.tsx
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '../../stores/authStore';
+import { useKPIStore } from '../../stores/kpiStore';
+import { useBusesStore } from '../../stores/busesStore';
+import { useDriversStore } from '../../stores/driversStore';
+import { useSchedulesStore } from '../../stores/schedulesStore';
 import SuccessPopup from '../../components/SuccessPopup';
 import RevenueReports from './RevenueReports';
 import TicketsManagement from './TicketsManagement';
@@ -56,7 +61,6 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 
-// SafariTix Brand Colors
 const COLORS = {
   primary: '#0077B6',
   primaryDark: '#005F8E',
@@ -68,13 +72,6 @@ const COLORS = {
   white: '#FFFFFF',
 };
 
-const routePerformance = [
-  { route: 'Kigali → Gisenyi', trips: 45, revenue: 1250000, occupancy: 92 },
-  { route: 'Kigali → Butare', trips: 38, revenue: 980000, occupancy: 88 },
-  { route: 'Kigali → Musanze', trips: 32, revenue: 720000, occupancy: 85 },
-  { route: 'Butare → Huye', trips: 28, revenue: 520000, occupancy: 78 },
-];
-
 const notifications = [
   { id: 1, type: 'alert', message: 'Bus RAB-202B scheduled for maintenance today', time: '10 min ago' },
   { id: 2, type: 'success', message: '3 new ticket bookings for Kigali → Gisenyi route', time: '25 min ago' },
@@ -82,24 +79,50 @@ const notifications = [
 ];
 
 export default function CompanyDashboard() {
+  const { user, logout } = useAuthStore();
+  const navigate = useNavigate();
+  
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeSection, setActiveSection] = useState('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { signOut } = useAuth();
-  const navigate = useNavigate();
 
-  // Read logged-in user (stored by login/signup) from localStorage
-  let storedUser = null;
-  try {
-    storedUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || 'null') : null;
-  } catch (e) {
-    storedUser = null;
-  }
+  const { 
+    totalBuses,
+    activeBuses,
+    activeRoutes,
+    activeDrivers,
+    todaysRevenue,
+    todaysTickets,
+    activeTripsCount,
+    activeBusesList,
+    revenueData,
+    busStatusData,
+    recentTickets,
+    loading: kpiLoading,
+    fetchDashboardData 
+  } = useKPIStore();
 
-  const displayName = storedUser ? (storedUser.full_name || storedUser.name || storedUser.fullName || storedUser.email) : 'Admin User';
-  const displayRole = storedUser
-    ? (storedUser.role === 'company_admin' ? 'Company Admin' : (storedUser.role || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()))
-    : 'Company Admin';
+  const { fetchBuses } = useBusesStore();
+  const { fetchDrivers } = useDriversStore();
+  const { fetchSchedules } = useSchedulesStore();
+
+  useEffect(() => {
+    fetchDashboardData();
+    fetchBuses();
+    fetchDrivers();
+    fetchSchedules();
+
+    // Poll for active buses every 5 seconds
+    const interval = setInterval(() => {
+      fetchDashboardData();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const displayName = user?.name || user?.full_name || user?.email || 'Admin User';
+  const displayRole = user?.role === 'company_admin' ? 'Company Admin' : 
+                     (user?.role || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -112,234 +135,10 @@ export default function CompanyDashboard() {
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
-  // KPI state from backend
-  const [kpis, setKpis] = React.useState({
-    totalBuses: 0,
-    activeBuses: 0,
-    activeRoutes: 0,
-    activeDrivers: 0,
-    todaysRevenue: 0,
-    todaysTickets: 0
-  });
-
-  const [activeBusesList, setActiveBusesList] = React.useState<any[]>([]);
-  const [busStatusData, setBusStatusData] = React.useState([
-    { name: 'Active', value: 0, color: COLORS.success },
-    { name: 'In Maintenance', value: 0, color: COLORS.secondary },
-    { name: 'Inactive', value: 0, color: COLORS.danger },
-  ]);
-  const [recentTickets, setRecentTickets] = React.useState<any[]>([]);
-  const [revenueData, setRevenueData] = React.useState<any[]>([]);
-  const [totalActiveTrips, setTotalActiveTrips] = useState(0);
-
-  React.useEffect(() => {
-    let mounted = true;
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-    const headers = token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-
-    async function loadActiveBuses() {
-      try {
-        // Fetch active trips from the new endpoint
-        const activeTripsRes = await fetch('/api/company/active-trips', { headers });
-
-        if (!mounted) return;
-
-        if (activeTripsRes.ok) {
-          const activeTripsData = await activeTripsRes.json();
-          const activeTrips = activeTripsData.activeTrips || [];
-          
-          console.log('Active trips fetched:', activeTrips);
-          const inProgressTrips = activeTrips.filter((trip: any) => trip.status === 'in_progress');
-          setTotalActiveTrips(inProgressTrips.length);
-
-          // Map active trips to the expected format for the dashboard
-          const active = activeTrips.map((trip: any) => {
-            // Calculate ETA (time since trip started)
-            let eta = '—';
-            if (trip.tripStartTime) {
-              const startTime = new Date(trip.tripStartTime).getTime();
-              const now = Date.now();
-              const elapsedMinutes = Math.floor((now - startTime) / 60000);
-              eta = `${elapsedMinutes} min ago`;
-            }
-
-            const route = `${trip.routeFrom} → ${trip.routeTo}`;
-
-            return {
-              id: trip.busPlate,
-              plate: trip.busPlate,
-              driver: trip.driverName || '—',
-              route,
-              occupancy: '—', // We don't have this data yet
-              eta,
-              status: 'in_progress'
-            };
-          });
-          console.log("acctive buses", active)
-
-          setActiveBusesList(active);
-        } else {
-          console.warn('Failed to fetch active trips:', activeTripsRes.statusText);
-          setActiveBusesList([]);
-        }
-      } catch (err) {
-        console.warn('Failed to load active buses', err);
-        setActiveBusesList([]);
-      }
-    }
-
-    // Load active buses immediately
-    loadActiveBuses();
-
-    // Poll for updates every 5 seconds
-    const pollInterval = setInterval(() => {
-      loadActiveBuses();
-    }, 5000);
-
-    return () => { 
-      mounted = false; 
-      clearInterval(pollInterval);
-    };
-  }, []);
-
-  React.useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-    const headers = token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-
-    async function fetchKpis() {
-      try {
-        const [busesRes, driversRes, schedulesRes, ticketsRes, activeTripsRes] = await Promise.all([
-          fetch('/api/company/buses', { headers }),
-            fetch('/api/company/drivers', { headers }),
-            fetch('/api/company/schedules', { headers }),
-            fetch('/api/company/tickets', { headers }),
-            fetch('/api/company/active-trips', { headers })
-        ]);
-
-        const busesJson = busesRes.ok ? await busesRes.json() : { buses: [] };
-        const driversJson = driversRes.ok ? await driversRes.json() : { drivers: [] };
-        const schedulesJson = schedulesRes.ok ? await schedulesRes.json() : { schedules: [] };
-        const ticketsJson = ticketsRes.ok ? await ticketsRes.json() : { tickets: [] };
-        const activeTripsJson = activeTripsRes.ok ? await activeTripsRes.json() : { activeTrips: [] };
-
-        const buses = busesJson.buses || [];
-        const drivers = driversJson.drivers || [];
-        const schedules = schedulesJson.schedules || [];
-        const tickets = ticketsJson.tickets || [];
-        const activeTrips = activeTripsJson.activeTrips || [];
-
-        const totalBuses = buses.length;
-        const activeBuses = activeTrips.length; // Use active trips count instead of bus status
-
-        // Count unique routes from schedules
-        const routeSet = new Set();
-        schedules.forEach(s => routeSet.add(`${s.routeFrom || ''}::${s.routeTo || ''}`));
-        const activeRoutes = routeSet.size;
-
-        const activeDrivers = drivers.length;
-
-        // Today's revenue and tickets from schedules (sold seats × price)
-        const today = new Date();
-        const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD format
-
-        let todaysRevenue = 0;
-        let todaysTickets = 0;
-        schedules.forEach(s => {
-          // Check if schedule is for today
-          const scheduleDate = s.scheduleDate || s.date || s.schedule_date;
-          if (scheduleDate && scheduleDate.startsWith(todayStr)) {
-            const totalSeats = s.totalSeats || s.total_seats || 0;
-            const availableSeats = (s.seatsAvailable != null ? s.seatsAvailable : s.seats_available) || 0;
-            const soldSeats = totalSeats - availableSeats;
-            const price = s.price || 0;
-            const scheduleRevenue = soldSeats * price;
-            
-            todaysRevenue += scheduleRevenue;
-            todaysTickets += soldSeats;
-          }
-        });
-
-        setKpis({ totalBuses, activeBuses, activeRoutes, activeDrivers, todaysRevenue, todaysTickets });
-
-        // Calculate bus status data
-        const statusCounts = { active: 0, maintenance: 0, inactive: 0 };
-        buses.forEach(b => {
-          const status = String(b.status || '').toLowerCase();
-          if (status === 'active') statusCounts.active++;
-          else if (status.includes('maintenance') || status === 'maintenance') statusCounts.maintenance++;
-          else statusCounts.inactive++;
-        });
-        setBusStatusData([
-          { name: 'Active', value: statusCounts.active, color: COLORS.success },
-          { name: 'In Maintenance', value: statusCounts.maintenance, color: COLORS.secondary },
-          { name: 'Inactive', value: statusCounts.inactive, color: COLORS.danger },
-        ]);
-
-        // Get recent tickets (last 5, sorted by date)
-        const sortedTickets = [...tickets]
-          .sort((a, b) => {
-            const dateA = new Date(a.bookedAt || a.booked_at || a.created_at || 0);
-            const dateB = new Date(b.bookedAt || b.booked_at || b.created_at || 0);
-            return dateB.getTime() - dateA.getTime();
-          })
-          .slice(0, 5)
-          .map(t => ({
-            id: t.bookingReference || t.booking_reference || t.id || '—',
-            passenger: t.passengerName || t.passenger_name || (t.user && (t.user.full_name || t.user.name)) || '—',
-            route: (t.routeFrom || t.route_from || '—') + ' → ' + (t.routeTo || t.route_to || '—'),
-            date: t.bookedAt || t.booked_at || t.created_at ? new Date(t.bookedAt || t.booked_at || t.created_at).toISOString().split('T')[0] : '—',
-            amount: parseFloat(t.price || t.totalPrice || t.total_price || 0),
-            status: t.status || 'confirmed'
-          }));
-        setRecentTickets(sortedTickets);
-
-        // Calculate monthly revenue data (last 6 months)
-        const monthlyRevenue = new Map<string, { revenue: number; tickets: number }>();
-        const last6Months = [];
-        for (let i = 5; i >= 0; i--) {
-          const d = new Date();
-          d.setMonth(d.getMonth() - i);
-          const key = d.toISOString().slice(0, 7); // YYYY-MM
-          const monthName = d.toLocaleString('default', { month: 'short' });
-          last6Months.push({ key, monthName });
-          monthlyRevenue.set(key, { revenue: 0, tickets: 0 });
-        }
-
-        schedules.forEach(s => {
-          const scheduleDate = s.scheduleDate || s.date || s.schedule_date;
-          if (scheduleDate) {
-            const monthKey = scheduleDate.slice(0, 7); // YYYY-MM
-            if (monthlyRevenue.has(monthKey)) {
-              const totalSeats = s.totalSeats || s.total_seats || 0;
-              const availableSeats = (s.seatsAvailable != null ? s.seatsAvailable : s.seats_available) || 0;
-              const soldSeats = totalSeats - availableSeats;
-              const price = s.price || 0;
-              const scheduleRevenue = soldSeats * price;
-              
-              const current = monthlyRevenue.get(monthKey)!;
-              current.revenue += scheduleRevenue;
-              current.tickets += soldSeats;
-            }
-          }
-        });
-
-        const chartData = last6Months.map(m => {
-          const data = monthlyRevenue.get(m.key)!;
-          return {
-            month: m.monthName,
-            revenue: data.revenue,
-            tickets: data.tickets,
-            occupancy: 0 // Not calculating occupancy for now
-          };
-        });
-        setRevenueData(chartData);
-      } catch (err) {
-        console.warn('Failed to load KPI data', err);
-      }
-    }
-
-    fetchKpis();
-  }, []);
+  const handleLogout = async () => {
+    await logout();
+    navigate('/app/login', { replace: true });
+  };
 
   return (
     <div className="flex h-screen bg-[#F5F7FA] font-['Inter']">
@@ -400,7 +199,10 @@ export default function CompanyDashboard() {
 
         {/* Logout Button */}
         <div className="absolute bottom-0 left-0 right-0 p-3">
-          <button onClick={() => { signOut(); navigate('/app/login', { replace: true }); }} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-300 hover:bg-red-500/20 hover:text-red-400 transition-all duration-300 font-medium text-sm">
+          <button 
+            onClick={handleLogout} 
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-300 hover:bg-red-500/20 hover:text-red-400 transition-all duration-300 font-medium text-sm"
+          >
             <LogOut className="w-5 h-5 flex-shrink-0" />
             {sidebarOpen && <span>Logout</span>}
           </button>
@@ -469,13 +271,29 @@ export default function CompanyDashboard() {
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-8">
-          {activeSection === 'dashboard' && <DashboardOverview kpis={kpis} activeBusesList={activeBusesList} revenueData={revenueData} busStatusData={busStatusData} recentTickets={recentTickets} />}
+          {activeSection === 'dashboard' && (
+            <DashboardOverview 
+              kpis={{
+                totalBuses,
+                activeBuses,
+                activeRoutes,
+                activeDrivers,
+                todaysRevenue,
+                todaysTickets
+              }}
+              activeBusesList={activeBusesList}
+              revenueData={revenueData}
+              busStatusData={busStatusData}
+              recentTickets={recentTickets}
+              loading={kpiLoading}
+            />
+          )}
           {activeSection === 'buses' && <BusesSection />}
           {activeSection === 'drivers' && <DriversSection />}
           {activeSection === 'schedules' && <SchedulesSection />}
           {activeSection === 'tickets' && <TicketsManagement />}
           {activeSection === 'revenue' && <RevenueReports />}
-          {activeSection === 'tracking' && <TrackingSection totalActiveTrips={totalActiveTrips} />}
+          {activeSection === 'tracking' && <TrackingSection totalActiveTrips={activeTripsCount} />}
           {activeSection === 'settings' && <SettingsSection />}
         </main>
       </div>
@@ -484,12 +302,25 @@ export default function CompanyDashboard() {
 }
 
 // Dashboard Overview Component
-function DashboardOverview({ kpis, activeBusesList, revenueData, busStatusData, recentTickets }: { kpis: any; activeBusesList?: any[]; revenueData?: any[]; busStatusData?: any[]; recentTickets?: any[] }) {
-  kpis = kpis || { totalBuses: 0, activeBuses: 0, activeRoutes: 0, activeDrivers: 0, todaysRevenue: 0, todaysTickets: 0 };
-  activeBusesList = activeBusesList || [];
-  revenueData = revenueData || [];
-  busStatusData = busStatusData || [];
-  recentTickets = recentTickets || [];
+function DashboardOverview({ kpis, activeBusesList, revenueData, busStatusData, recentTickets, loading }: { 
+  kpis: any; 
+  activeBusesList?: any[]; 
+  revenueData?: any[]; 
+  busStatusData?: any[]; 
+  recentTickets?: any[];
+  loading?: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-[#0077B6] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard data...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Page Title */}
@@ -602,7 +433,7 @@ function DashboardOverview({ kpis, activeBusesList, revenueData, busStatusData, 
                 paddingAngle={5}
                 dataKey="value"
               >
-                {busStatusData.map((entry, index) => (
+                {busStatusData?.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
               </Pie>
@@ -610,7 +441,7 @@ function DashboardOverview({ kpis, activeBusesList, revenueData, busStatusData, 
             </PieChart>
           </ResponsiveContainer>
           <div className="mt-4 space-y-2">
-            {busStatusData.map((item, index) => (
+            {busStatusData?.map((item, index) => (
               <div key={index} className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></div>
@@ -621,6 +452,10 @@ function DashboardOverview({ kpis, activeBusesList, revenueData, busStatusData, 
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Active Buses and Recent Tickets */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Active Buses */}
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
           <div className="flex items-center justify-between mb-6">
@@ -632,13 +467,13 @@ function DashboardOverview({ kpis, activeBusesList, revenueData, busStatusData, 
             </button>
           </div>
           <div className="space-y-4">
-            {activeBusesList.length === 0 ? (
+            {activeBusesList?.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <Bus className="w-12 h-12 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">No active buses at the moment</p>
               </div>
             ) : (
-              activeBusesList.map((bus) => (
+              activeBusesList?.map((bus) => (
                 <div key={bus.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 bg-gradient-to-br from-[#0077B6] to-[#005F8E] rounded-xl flex items-center justify-center">
@@ -671,13 +506,13 @@ function DashboardOverview({ kpis, activeBusesList, revenueData, busStatusData, 
             </button>
           </div>
           <div className="space-y-3">
-            {recentTickets.length === 0 ? (
+            {recentTickets?.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <Ticket className="w-12 h-12 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">No recent tickets</p>
               </div>
             ) : (
-              recentTickets.map((ticket) => (
+              recentTickets?.map((ticket) => (
                 <div key={ticket.id} className="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:border-[#0077B6] transition-colors">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
@@ -693,7 +528,7 @@ function DashboardOverview({ kpis, activeBusesList, revenueData, busStatusData, 
                     <div className="text-xs text-gray-500 mt-1">{ticket.route}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm font-bold text-gray-900">RWF {ticket.amount.toLocaleString()}</div>
+                    <div className="text-sm font-bold text-gray-900">RWF {ticket.amount?.toLocaleString()}</div>
                     <div className="text-xs text-gray-500 mt-1">{ticket.date}</div>
                   </div>
                 </div>
@@ -739,7 +574,7 @@ function DashboardOverview({ kpis, activeBusesList, revenueData, busStatusData, 
 }
 
 // KPI Card Component
-function KPICard({ title, value, change, trend, icon: Icon, color, subtitle }) {
+function KPICard({ title, value, change, trend, icon: Icon, color, subtitle }: any) {
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-lg transition-shadow">
       <div className="flex items-start justify-between mb-4">
@@ -760,55 +595,17 @@ function KPICard({ title, value, change, trend, icon: Icon, color, subtitle }) {
   );
 }
 
-// Placeholder sections - to be implemented
+// Placeholder sections - to be implemented with stores
 function BusesSection() {
-  const [buses, setBuses] = React.useState<any[]>([]);
-  const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
-  const [drivers, setDrivers] = React.useState<any[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [showAddBus, setShowAddBus] = React.useState(false);
-  const [showEditBus, setShowEditBus] = React.useState(false);
-  const [editBus, setEditBus] = React.useState<any | null>(null);
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const { buses, loading, error, fetchBuses, addBus, updateBus, deleteBus } = useBusesStore();
+  const { drivers, fetchDrivers } = useDriversStore();
+  const [showAddBus, setShowAddBus] = useState(false);
+  const [showEditBus, setShowEditBus] = useState(false);
+  const [editBus, setEditBus] = useState<any | null>(null);
 
-  React.useEffect(() => {
-    let mounted = true;
-    const headers = token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-    async function load() {
-      try {
-        const [busesRes, driversRes] = await Promise.all([
-          fetch('/api/company/buses', { headers }),
-          fetch('/api/company/drivers', { headers }),
-        ]);
-        if (!mounted) return;
-
-        if (!busesRes.ok) {
-          const txt = await busesRes.text().catch(() => null);
-          setErrorMsg(txt || `Failed to load buses: ${busesRes.status}`);
-          setBuses([]);
-        } else {
-          const busesJson = await busesRes.json();
-          setBuses(busesJson.buses || []);
-        }
-
-        if (!driversRes.ok) {
-          setDrivers([]);
-        } else {
-          const driversJson = await driversRes.json();
-          setDrivers(driversJson.drivers || []);
-        }
-      } catch (err) {
-        console.warn('Failed to load buses or drivers', err);
-        if (mounted) {
-          setBuses([]);
-          setDrivers([]);
-        }
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    }
-    load();
-    return () => { mounted = false; };
+  useEffect(() => {
+    fetchBuses();
+    fetchDrivers();
   }, []);
 
   return (
@@ -820,8 +617,8 @@ function BusesSection() {
 
       {loading ? (
         <div className="text-sm text-gray-500">Loading buses...</div>
-      ) : errorMsg ? (
-        <div className="text-sm text-red-500">{errorMsg}</div>
+      ) : error ? (
+        <div className="text-sm text-red-500">{error}</div>
       ) : buses.length === 0 ? (
         <div className="text-sm text-gray-500">No buses found for this company.</div>
       ) : (
@@ -841,10 +638,10 @@ function BusesSection() {
               {buses.map((b) => (
                 <tr key={b.id} className="hover:bg-gray-50">
                   <td className="px-3 py-2 border-b">{b.plate_number || b.plateNumber || b.id}</td>
-                  <td className="px-3 py-2 border-b">{b.model || b.make || '—'}</td>
+                  <td className="px-3 py-2 border-b">{b.model || '—'}</td>
                   <td className="px-3 py-2 border-b">{b.capacity || '—'}</td>
-                  <td className="px-3 py-2 border-b">{b.driverName || (b.driver && (b.driver.full_name || b.driver.name)) || b.driver_id || '—'}</td>
-                  <td className="px-3 py-2 border-b">{b.status ? String(b.status) : '—'}</td>
+                  <td className="px-3 py-2 border-b">{b.driver?.name || b.driverName || '—'}</td>
+                  <td className="px-3 py-2 border-b">{b.status || '—'}</td>
                   <td className="px-3 py-2 border-b">
                     <button onClick={() => { setShowEditBus(true); setEditBus(b); }} className="px-2 py-1 bg-gray-100 rounded">Edit</button>
                   </td>
@@ -855,45 +652,44 @@ function BusesSection() {
         </div>
       )}
 
-      {showAddBus && <AddBusModal token={token} drivers={drivers} onClose={() => setShowAddBus(false)} onCreated={() => { setShowAddBus(false); window.location.reload(); }} />}
-      {showEditBus && editBus && <EditBusModal token={token} drivers={drivers} bus={editBus} onClose={() => { setShowEditBus(false); setEditBus(null); }} onUpdated={() => { setShowEditBus(false); setEditBus(null); window.location.reload(); }} />}
+      {showAddBus && (
+        <AddBusModal 
+          onClose={() => setShowAddBus(false)} 
+          drivers={drivers}
+          onCreated={() => {
+            setShowAddBus(false);
+            fetchBuses();
+          }} 
+        />
+      )}
+      {showEditBus && editBus && (
+        <EditBusModal 
+          bus={editBus} 
+          drivers={drivers}
+          onClose={() => { setShowEditBus(false); setEditBus(null); }} 
+          onUpdated={() => {
+            setShowEditBus(false);
+            setEditBus(null);
+            fetchBuses();
+          }} 
+        />
+      )}
     </div>
   );
 }
 
 function DriversSection() {
-  const [drivers, setDrivers] = React.useState<any[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [selected, setSelected] = React.useState<any>(null);
-  const [showAddDriver, setShowAddDriver] = React.useState(false);
-  const [showEditDriver, setShowEditDriver] = React.useState(false);
-  const [editDriver, setEditDriver] = React.useState<any | null>(null);
-  const [successPopup, setSuccessPopup] = React.useState<{ open: boolean; tempPassword?: string | null; message?: string | null }>({ open: false, tempPassword: null, message: null });
-  const [selectedIds, setSelectedIds] = React.useState<Record<string, boolean>>({});
-  const [selectAll, setSelectAll] = React.useState(false);
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const { drivers, loading, error, fetchDrivers, addDriver, updateDriver, deleteDriver } = useDriversStore();
+  const [selected, setSelected] = useState<any>(null);
+  const [showAddDriver, setShowAddDriver] = useState(false);
+  const [showEditDriver, setShowEditDriver] = useState(false);
+  const [editDriver, setEditDriver] = useState<any | null>(null);
+  const [successPopup, setSuccessPopup] = useState<{ open: boolean; tempPassword?: string | null; message?: string | null }>({ open: false, tempPassword: null, message: null });
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
+  const [selectAll, setSelectAll] = useState(false);
 
-  React.useEffect(() => {
-    let mounted = true;
-    const headers = token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-    async function load() {
-      try {
-        const res = await fetch('/api/company/drivers', { headers });
-        if (!mounted) return;
-        if (res.ok) {
-          const json = await res.json();
-          setDrivers(json.drivers || []);
-        } else {
-          setDrivers([]);
-        }
-      } catch (e) {
-        setDrivers([]);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    }
-    load();
-    return () => { mounted = false; };
+  useEffect(() => {
+    fetchDrivers();
   }, []);
 
   return (
@@ -905,6 +701,8 @@ function DriversSection() {
 
       {loading ? (
         <div className="text-sm text-gray-500">Loading drivers...</div>
+      ) : error ? (
+        <div className="text-sm text-red-500">{error}</div>
       ) : drivers.length === 0 ? (
         <div className="text-sm text-gray-500">No drivers found for this company.</div>
       ) : (
@@ -942,7 +740,7 @@ function DriversSection() {
                       if (!e.target.checked) setSelectAll(false);
                     }} />
                   </td>
-                  <td className="px-3 py-2 border-b">{d.name}</td>
+                  <td className="px-3 py-2 border-b">{d.name || d.full_name}</td>
                   <td className="px-3 py-2 border-b">{d.email || '—'}</td>
                   <td className="px-3 py-2 border-b">{d.phone || '—'}</td>
                   <td className="px-3 py-2 border-b">{d.license || '—'}</td>
@@ -954,16 +752,9 @@ function DriversSection() {
                     <button onClick={async () => {
                       if (!confirm('Delete this driver? This cannot be undone.')) return;
                       try {
-                        const headers = token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-                        const res = await fetch(`/api/company/drivers/${d.id}`, { method: 'DELETE', headers });
-                        if (!res.ok) {
-                          const txt = await res.text().catch(() => null);
-                          throw new Error(txt || `Failed to delete driver: ${res.status}`);
-                        }
-                        // refresh list
-                        window.location.reload();
+                        await deleteDriver(d.id);
                       } catch (err) {
-                        alert('Failed to delete driver: ' + (err && err.message ? err.message : err));
+                        alert('Failed to delete driver');
                       }
                     }} className="px-2 py-1 bg-red-100 text-red-700 rounded">Delete</button>
                   </td>
@@ -975,23 +766,44 @@ function DriversSection() {
       )}
 
       {selected && <DriverModal driver={selected} onClose={() => setSelected(null)} />}
-      {showAddDriver && <AddDriverModal onClose={() => setShowAddDriver(false)} token={token} onCreated={(driver: any, tempPassword: string) => {
-        // Close create modal and show success popup with temporary password
-        setShowAddDriver(false);
-        setSuccessPopup({ open: true, tempPassword, message: 'Driver created successfully' });
-      }} />}
-      {showEditDriver && editDriver && <EditDriverModal token={token} driver={editDriver} onClose={() => { setShowEditDriver(false); setEditDriver(null); }} onUpdated={() => { setShowEditDriver(false); setEditDriver(null); window.location.reload(); }} />}
+      {showAddDriver && (
+        <AddDriverModal 
+          onClose={() => setShowAddDriver(false)} 
+          onCreated={(driver: any, tempPassword: string) => {
+            setShowAddDriver(false);
+            setSuccessPopup({ open: true, tempPassword, message: 'Driver created successfully' });
+          }} 
+        />
+      )}
+      {showEditDriver && editDriver && (
+        <EditDriverModal 
+          driver={editDriver} 
+          onClose={() => { setShowEditDriver(false); setEditDriver(null); }} 
+          onUpdated={() => {
+            setShowEditDriver(false);
+            setEditDriver(null);
+            fetchDrivers();
+          }} 
+        />
+      )}
 
-      {/* Success popup shown after creation */}
-      <>{successPopup.open && <SuccessPopup isOpen={successPopup.open} title="Driver created" message={successPopup.message || ''} tempPassword={successPopup.tempPassword || ''} onClose={() => { setSuccessPopup({ open: false, tempPassword: null, message: null }); window.location.reload(); }} />}</>
+      {successPopup.open && (
+        <SuccessPopup 
+          isOpen={successPopup.open} 
+          title="Driver created" 
+          message={successPopup.message || ''} 
+          tempPassword={successPopup.tempPassword || ''} 
+          onClose={() => { 
+            setSuccessPopup({ open: false, tempPassword: null, message: null }); 
+            fetchDrivers();
+          }} 
+        />
+      )}
     </div>
   );
 }
 
 function DriverModal({ driver, onClose }: { driver: any; onClose: () => void }) {
-  const [details, setDetails] = React.useState<any>(driver);
-  React.useEffect(() => { setDetails(driver); }, [driver]);
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
@@ -1001,14 +813,14 @@ function DriverModal({ driver, onClose }: { driver: any; onClose: () => void }) 
           <button onClick={onClose} className="text-gray-500">Close</button>
         </div>
         <div className="space-y-3">
-          <div><span className="font-semibold">Name:</span> {details.name}</div>
-          <div><span className="font-semibold">License:</span> {details.license || 'N/A'}</div>
-          <div><span className="font-semibold">Phone:</span> {details.phone || 'N/A'}</div>
-          <div><span className="font-semibold">Status:</span> {details.available ? 'Available' : 'Unavailable'}</div>
+          <div><span className="font-semibold">Name:</span> {driver.name || driver.full_name}</div>
+          <div><span className="font-semibold">License:</span> {driver.license || 'N/A'}</div>
+          <div><span className="font-semibold">Phone:</span> {driver.phone || 'N/A'}</div>
+          <div><span className="font-semibold">Status:</span> {driver.available ? 'Available' : 'Unavailable'}</div>
           <div>
             <span className="font-semibold">Assigned buses:</span>
             <ul className="list-disc ml-6">
-              {(details.buses || []).map((b: any) => (<li key={b.id}>{b.plate_number || b.plateNumber || b.id}</li>))}
+              {(driver.buses || []).map((b: any) => (<li key={b.id}>{b.plate_number || b.plateNumber || b.id}</li>))}
             </ul>
           </div>
         </div>
@@ -1018,51 +830,13 @@ function DriverModal({ driver, onClose }: { driver: any; onClose: () => void }) 
 }
 
 function SchedulesSection() {
-  const [schedules, setSchedules] = React.useState<any[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-  const [showAdd, setShowAdd] = React.useState(false);
-  const [buses, setBuses] = React.useState<any[]>([]);
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const { schedules, loading, error, fetchSchedules, addSchedule } = useSchedulesStore();
+  const { buses, fetchBuses } = useBusesStore();
+  const [showAdd, setShowAdd] = useState(false);
 
-  React.useEffect(() => {
-    let mounted = true;
-    const headers = token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-
-    async function load() {
-      try {
-        const [sRes, busesRes] = await Promise.all([
-          fetch('/api/company/schedules', { headers }),
-          fetch('/api/company/buses', { headers }),
-        ]);
-
-        if (!mounted) return;
-
-        if (!sRes.ok) {
-          const txt = await sRes.text().catch(() => null);
-          setError(txt || `Failed to load schedules: ${sRes.status}`);
-          setSchedules([]);
-        } else {
-          const j = await sRes.json();
-          setSchedules(j.schedules || []);
-        }
-
-        if (busesRes.ok) {
-          const jb = await busesRes.json();
-          setBuses(jb.buses || []);
-        } else {
-          setBuses([]);
-        }
-      } catch (err) {
-        console.warn('Failed to load schedules', err);
-        if (mounted) setError('Failed to load schedules');
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    }
-
-    load();
-    return () => { mounted = false; };
+  useEffect(() => {
+    fetchSchedules();
+    fetchBuses();
   }, []);
 
   return (
@@ -1106,13 +880,13 @@ function SchedulesSection() {
                   <tr key={s.id} className="hover:bg-gray-50">
                     <td className="px-3 py-2 border-b">{s.scheduleDate || s.date || s.schedule_date || '—'}</td>
                     <td className="px-3 py-2 border-b">{(s.routeFrom || '—') + ' → ' + (s.routeTo || '—')}</td>
-                    <td className="px-3 py-2 border-b">{s.busPlateNumber || (s.Bus && (s.Bus.plate_number || s.Bus.plateNumber)) || '—'}</td>
+                    <td className="px-3 py-2 border-b">{s.busPlateNumber || (s.bus?.plate_number) || '—'}</td>
                     <td className="px-3 py-2 border-b">{s.departureTime || '—'}</td>
                     <td className="px-3 py-2 border-b">{s.arrivalTime || '—'}</td>
                     <td className="px-3 py-2 border-b">{availableSeats + '/' + (totalSeats || '—')}</td>
                     <td className="px-3 py-2 border-b">{price ? `RWF ${price.toLocaleString()}` : '—'}</td>
                     <td className="px-3 py-2 border-b font-semibold text-[#27AE60]">{revenue > 0 ? `RWF ${revenue.toLocaleString()}` : 'RWF 0'}</td>
-                    <td className="px-3 py-2 border-b">{s.driverName || (s.driver && (s.driver.full_name || s.driver.name)) || '—'}</td>
+                    <td className="px-3 py-2 border-b">{s.driverName || s.driver?.name || '—'}</td>
                   </tr>
                 );
               })}
@@ -1121,14 +895,21 @@ function SchedulesSection() {
         </div>
       )}
 
-      {showAdd && <AddScheduleModal token={token} buses={buses} onClose={() => { setShowAdd(false); window.location.reload(); }} />}
+      {showAdd && (
+        <AddScheduleModal 
+          buses={buses} 
+          onClose={() => { 
+            setShowAdd(false); 
+            fetchSchedules(); 
+          }} 
+        />
+      )}
     </div>
   );
 }
 
-function TrackingSection({totalActiveTrips}: { totalActiveTrips: number  }) {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-  return <CompanyFleetTracking token={token} activeBuses={totalActiveTrips} />;
+function TrackingSection({ totalActiveTrips }: { totalActiveTrips: number }) {
+  return <CompanyFleetTracking activeBuses={totalActiveTrips} />;
 }
 
 function SettingsSection() {
@@ -1140,13 +921,15 @@ function SettingsSection() {
   );
 }
 
-function AddDriverModal({ onClose, token, onCreated }: { onClose: () => void; token: string | null; onCreated?: (driver: any, tempPassword: string) => void }) {
-  const [fullName, setFullName] = React.useState('');
-  const [email, setEmail] = React.useState('');
-  const [phone, setPhone] = React.useState('');
-  const [license, setLicense] = React.useState('');
-  const [error, setError] = React.useState('');
-  const [saving, setSaving] = React.useState(false);
+// Modal Components (simplified - using stores instead of fetch)
+function AddDriverModal({ onClose, onCreated }: { onClose: () => void; onCreated?: (driver: any, tempPassword: string) => void }) {
+  const { addDriver } = useDriversStore();
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [license, setLicense] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const submit = async (e: any) => {
     e.preventDefault();
@@ -1154,30 +937,11 @@ function AddDriverModal({ onClose, token, onCreated }: { onClose: () => void; to
     if (!fullName || !license) { setError('Name and license number are required'); return; }
     setSaving(true);
     try {
-      const res = await fetch('/api/company/drivers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ name: fullName, email, phone, license })
-      });
-      const contentType = (res.headers && res.headers.get ? res.headers.get('content-type') || '' : '');
-      if (!res.ok) {
-        // Try to read text for better error message (handles HTML error pages)
-        const text = await res.text().catch(() => null);
-        throw new Error((text && text.slice ? text.slice(0, 1000) : `Request failed with status ${res.status}`) || 'Failed to create driver');
-      }
-
-      if (!contentType.includes('application/json')) {
-        const text = await res.text().catch(() => null);
-        throw new Error((text && text.slice ? `Unexpected non-JSON response: ${text.slice(0,200)}` : 'Unexpected non-JSON response from server'));
-      }
-
-      const j = await res.json();
-      if (!j || j.error) throw new Error(j?.error || 'Failed to create driver');
-      // Trigger parent callback with temporary password so frontend can show it
-      if (onCreated) onCreated(j.driver, j.temporaryPassword);
+      const { driver, temporaryPassword } = await addDriver({ name: fullName, email, phone, license });
+      if (onCreated) onCreated(driver, temporaryPassword);
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Error');
+      setError(err.message || 'Error creating driver');
     } finally {
       setSaving(false);
     }
@@ -1219,13 +983,14 @@ function AddDriverModal({ onClose, token, onCreated }: { onClose: () => void; to
   );
 }
 
-function AddBusModal({ onClose, token, drivers, onCreated }: { onClose: () => void; token: string | null; drivers: any[]; onCreated?: () => void }) {
-  const [plate, setPlate] = React.useState('');
-  const [model, setModel] = React.useState('');
-  const [capacity, setCapacity] = React.useState('30');
-  const [driverId, setDriverId] = React.useState<string | null>(null);
-  const [error, setError] = React.useState('');
-  const [saving, setSaving] = React.useState(false);
+function AddBusModal({ onClose, drivers, onCreated }: { onClose: () => void; drivers: any[]; onCreated?: () => void }) {
+  const { addBus } = useBusesStore();
+  const [plate, setPlate] = useState('');
+  const [model, setModel] = useState('');
+  const [capacity, setCapacity] = useState('30');
+  const [driverId, setDriverId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const selectableDrivers = React.useMemo(() => drivers.filter(d => !(String(d.id || '').startsWith('legacy-'))), [drivers]);
 
@@ -1233,24 +998,15 @@ function AddBusModal({ onClose, token, drivers, onCreated }: { onClose: () => vo
     e.preventDefault();
     setError('');
     if (!plate || !driverId) { setError('Plate number and driver selection are required'); return; }
-    // Validate driverId looks like a UUID (prevent sending numeric indices)
     const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
     if (driverId && !uuidRegex.test(driverId)) { setError('Invalid driver selected'); return; }
     setSaving(true);
     try {
-      const res = await fetch('/api/company/buses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ plate_number: plate, model, capacity: parseInt(capacity, 10) || 30, driver_id: driverId })
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => null);
-        throw new Error((text && text.slice ? text.slice(0, 1000) : `Request failed with status ${res.status}`) || 'Failed to create bus');
-      }
+      await addBus({ plate_number: plate, model, capacity: parseInt(capacity, 10) || 30, driver_id: driverId });
       if (onCreated) onCreated();
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Error');
+      setError(err.message || 'Error creating bus');
     } finally {
       setSaving(false);
     }
@@ -1299,35 +1055,39 @@ function AddBusModal({ onClose, token, drivers, onCreated }: { onClose: () => vo
   );
 }
 
-function AddScheduleModal({ onClose, token, buses }: { onClose: () => void; token: string | null; buses: any[] }) {
-  const [routeFrom, setRouteFrom] = React.useState('');
-  const [routeTo, setRouteTo] = React.useState('');
-  const [date, setDate] = React.useState('');
-  const [departureTime, setDepartureTime] = React.useState('');
-  const [arrivalTime, setArrivalTime] = React.useState('');
-  const [price, setPrice] = React.useState('0');
-  const [busId, setBusId] = React.useState<string | null>(null);
-  const [error, setError] = React.useState('');
-  const [saving, setSaving] = React.useState(false);
+function AddScheduleModal({ onClose, buses }: { onClose: () => void; buses: any[] }) {
+  const { addSchedule } = useSchedulesStore();
+  const [routeFrom, setRouteFrom] = useState('');
+  const [routeTo, setRouteTo] = useState('');
+  const [date, setDate] = useState('');
+  const [departureTime, setDepartureTime] = useState('');
+  const [arrivalTime, setArrivalTime] = useState('');
+  const [price, setPrice] = useState('0');
+  const [busId, setBusId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const submit = async (e: any) => {
     e.preventDefault();
     setError('');
-    if (!busId || !routeFrom || !routeTo || !date || !departureTime || !price) { setError('Bus, route, date, departure time and price are required'); return; }
+    if (!busId || !routeFrom || !routeTo || !date || !departureTime || !price) { 
+      setError('Bus, route, date, departure time and price are required'); 
+      return; 
+    }
     setSaving(true);
     try {
-      const res = await fetch('/api/company/schedules', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ busId, routeFrom, routeTo, departureTime, arrivalTime, price: parseFloat(price || '0'), date })
+      await addSchedule({ 
+        busId, 
+        routeFrom, 
+        routeTo, 
+        departureTime, 
+        arrivalTime, 
+        price: parseFloat(price || '0'), 
+        date 
       });
-      if (!res.ok) {
-        const text = await res.text().catch(() => null);
-        throw new Error((text && text.slice ? text.slice(0, 1000) : `Request failed with status ${res.status}`) || 'Failed to create schedule');
-      }
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Error');
+      setError(err.message || 'Error creating schedule');
     } finally {
       setSaving(false);
     }
@@ -1387,13 +1147,14 @@ function AddScheduleModal({ onClose, token, buses }: { onClose: () => void; toke
   );
 }
 
-function EditBusModal({ onClose, token, drivers, bus, onUpdated }: { onClose: () => void; token: string | null; drivers: any[]; bus: any; onUpdated?: () => void }) {
-  const [plate, setPlate] = React.useState(bus.plate_number || bus.plate || bus.plateNumber || '');
-  const [model, setModel] = React.useState(bus.model || '');
-  const [capacity, setCapacity] = React.useState(String(bus.capacity || '30'));
-  const [driverId, setDriverId] = React.useState<string | null>(bus.driverId || bus.driver_id || (bus.driver && bus.driver.id) || null);
-  const [error, setError] = React.useState('');
-  const [saving, setSaving] = React.useState(false);
+function EditBusModal({ onClose, drivers, bus, onUpdated }: { onClose: () => void; drivers: any[]; bus: any; onUpdated?: () => void }) {
+  const { updateBus } = useBusesStore();
+  const [plate, setPlate] = useState(bus.plate_number || bus.plate || bus.plateNumber || '');
+  const [model, setModel] = useState(bus.model || '');
+  const [capacity, setCapacity] = useState(String(bus.capacity || '30'));
+  const [driverId, setDriverId] = useState<string | null>(bus.driverId || bus.driver_id || (bus.driver && bus.driver.id) || null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const selectableDrivers = React.useMemo(() => drivers.filter(d => !(String(d.id || '').startsWith('legacy-'))), [drivers]);
 
@@ -1405,19 +1166,11 @@ function EditBusModal({ onClose, token, drivers, bus, onUpdated }: { onClose: ()
     if (driverId && !uuidRegex.test(driverId)) { setError('Invalid driver selected'); return; }
     setSaving(true);
     try {
-      const res = await fetch(`/api/company/buses/${bus.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ plate_number: plate, model, capacity: parseInt(capacity, 10) || 30, driver_id: driverId })
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => null);
-        throw new Error((text && text.slice ? text.slice(0, 1000) : `Request failed with status ${res.status}`) || 'Failed to update bus');
-      }
+      await updateBus(bus.id, { plate_number: plate, model, capacity: parseInt(capacity, 10) || 30, driver_id: driverId });
       if (onUpdated) onUpdated();
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Error');
+      setError(err.message || 'Error updating bus');
     } finally {
       setSaving(false);
     }
@@ -1466,13 +1219,14 @@ function EditBusModal({ onClose, token, drivers, bus, onUpdated }: { onClose: ()
   );
 }
 
-function EditDriverModal({ onClose, token, driver, onUpdated }: { onClose: () => void; token: string | null; driver: any; onUpdated?: () => void }) {
-  const [fullName, setFullName] = React.useState(driver.name || driver.full_name || '');
-  const [email, setEmail] = React.useState(driver.email || driver.email || '');
-  const [phone, setPhone] = React.useState(driver.phone || driver.phone_number || '');
-  const [license, setLicense] = React.useState(driver.license || '');
-  const [error, setError] = React.useState('');
-  const [saving, setSaving] = React.useState(false);
+function EditDriverModal({ onClose, driver, onUpdated }: { onClose: () => void; driver: any; onUpdated?: () => void }) {
+  const { updateDriver } = useDriversStore();
+  const [fullName, setFullName] = useState(driver.name || driver.full_name || '');
+  const [email, setEmail] = useState(driver.email || driver.email || '');
+  const [phone, setPhone] = useState(driver.phone || driver.phone_number || '');
+  const [license, setLicense] = useState(driver.license || '');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const submit = async (e: any) => {
     e.preventDefault();
@@ -1480,19 +1234,11 @@ function EditDriverModal({ onClose, token, driver, onUpdated }: { onClose: () =>
     if (!fullName || !license) { setError('Name and license number are required'); return; }
     setSaving(true);
     try {
-      const res = await fetch(`/api/company/drivers/${driver.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ name: fullName, email, phone, license })
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => null);
-        throw new Error((text && text.slice ? text.slice(0, 1000) : `Request failed with status ${res.status}`) || 'Failed to update driver');
-      }
+      await updateDriver(driver.id, { name: fullName, email, phone, license });
       if (onUpdated) onUpdated();
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Error');
+      setError(err.message || 'Error updating driver');
     } finally {
       setSaving(false);
     }
