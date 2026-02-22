@@ -1,6 +1,8 @@
+// components/SeatMap.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { User, Loader2 } from 'lucide-react';
-import { useAuth } from './AuthContext';
+import { useAuthStore } from '../stores/authStore';
+import { useSeatsStore } from '../stores/seatsStore';
 import { useNavigate } from 'react-router-dom';
 
 type SeatState = 'AVAILABLE' | 'LOCKED' | 'BOOKED' | 'DRIVER';
@@ -21,7 +23,7 @@ type SeatMapProps = {
   price?: number;
   className?: string;
   onBooked?: (result: any) => void;
-  onSelect?: (seat: any, lock?: any) => void; // Legacy callback for external booking flow
+  onSelect?: (seat: any, lock?: any) => void;
   scheduleDetails?: {
     routeFrom: string;
     routeTo: string;
@@ -30,85 +32,76 @@ type SeatMapProps = {
     busPlateNumber: string;
     companyName: string;
   };
+  selectedSeatsMap?: Record<string, boolean>;
+  setSelectedSeatsMap?: (seats: Record<string, boolean>) => void;
 };
 
-export default function SeatMap({ scheduleId, price = 0, className = '', onBooked, onSelect, scheduleDetails }: SeatMapProps) {
-  const { user, accessToken } = useAuth();
+export default function SeatMap({ 
+  scheduleId, 
+  price = 0, 
+  className = '', 
+  onBooked, 
+  onSelect, 
+  scheduleDetails,
+  selectedSeatsMap = {},
+  setSelectedSeatsMap
+}: SeatMapProps) {
+  const { user } = useAuthStore();
   const navigate = useNavigate();
-  const [seats, setSeats] = useState<Seat[]>([]);
-  const [loading, setLoading] = useState(false);
+  
+  const { 
+    seats, 
+    loading, 
+    error: storeError,
+    fetchSeats,
+    lockSeats,
+    clearError 
+  } = useSeatsStore();
+  
+  const [localSeats, setLocalSeats] = useState<Seat[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [selected, setSelected] = useState<Record<string, boolean>>(selectedSeatsMap);
 
-  const fetchSeats = async (isAutoRefresh = false) => {
-    if (isAutoRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
+  // Sync with parent component's selected seats if provided
+  useEffect(() => {
+    if (setSelectedSeatsMap) {
+      setSelectedSeatsMap(selected);
     }
-    setError(null);
-    try {
-      const hdrs: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (accessToken) hdrs['Authorization'] = `Bearer ${accessToken}`;
-      const res = await fetch(`/api/seats/schedules/${scheduleId}`, { headers: hdrs });
-      const ct = (res.headers.get('content-type') || '').toLowerCase();
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || `Failed to load seats (${res.status})`);
-      }
-      if (!ct.includes('application/json')) {
-        throw new Error('Seat endpoint returned non-JSON response');
-      }
-      const json = await res.json();
-      // Seats payload may be:
-      // - full seat objects with `seat_number` and `state`
-      // - an array of available seat numbers (strings/numbers)
-      // - empty array meaning "no seat info"
-      const returnedRaw = Array.isArray(json.seats) ? json.seats : (json.seats || []);
+  }, [selected, setSelectedSeatsMap]);
 
-      // derive total seats (capacity) from response when available, otherwise default to 29
-      const totalSeatsFromResp = Number(json.totalSeats ?? json.total_seats ?? json.capacity ?? 29) || 29;
-
+  // Transform store seats to local format
+  useEffect(() => {
+    if (seats.length > 0) {
+      // Derive total seats from response or default to 29
+      const totalSeats = 29; // You might want to get this from props or API
+      
       const seatMap = new Map<string, Seat>();
-
-      // Normalize returnedRaw into seatMap. If element is object with seat_number, use its state.
-      // If elements are primitive numbers/strings, treat them as AVAILABLE seat numbers.
-      returnedRaw.forEach((entry: any) => {
-        if (entry && typeof entry === 'object' && (entry.seat_number !== undefined || entry.id !== undefined)) {
-          const num = String(entry.seat_number ?? entry.id ?? entry.seat);
-          const state = (entry.state || entry.status || '').toString().toUpperCase() || (entry.locked ? 'LOCKED' : (entry.booked ? 'BOOKED' : 'AVAILABLE'));
-          seatMap.set(num, {
-            ...entry,
-            seat_number: num,
-            state: (state === 'LOCKED' || state === 'BOOKED') ? state as SeatState : 'AVAILABLE'
-          });
-        } else if (entry !== null && (typeof entry === 'string' || typeof entry === 'number')) {
-          seatMap.set(String(entry), { seat_number: String(entry), state: 'AVAILABLE' } as Seat);
-        }
+      seats.forEach(seat => {
+        seatMap.set(seat.seat_number, seat);
       });
 
       const organized: Seat[] = [];
-      for (let i = 1; i <= totalSeatsFromResp; i++) {
+      for (let i = 1; i <= totalSeats; i++) {
         const seatNum = String(i);
         const existing = seatMap.get(seatNum);
         if (existing) {
           organized.push(existing);
         } else {
-          // If the API did not provide info for this seat we assume it's AVAILABLE (not BOOKED).
           organized.push({ seat_number: seatNum, state: 'AVAILABLE' } as Seat);
         }
       }
 
-      setSeats(organized);
+      setLocalSeats(organized);
       
       // Log state verification
-      console.log(`\n🎫 SEAT MAP LOADED ====================`);
-      console.log(`Schedule: ${scheduleId}`);
-      console.log(`Total seats: ${organized.length}`);
       const availCount = organized.filter(s => s.state === 'AVAILABLE').length;
       const bookedCount = organized.filter(s => s.state === 'BOOKED').length;
       const lockedCount = organized.filter(s => s.state === 'LOCKED').length;
+      
+      console.log(`\n🎫 SEAT MAP LOADED ====================`);
+      console.log(`Schedule: ${scheduleId}`);
+      console.log(`Total seats: ${organized.length}`);
       console.log(`Available: ${availCount}`);
       console.log(`Booked: ${bookedCount} 🔴`);
       console.log(`Locked: ${lockedCount} 🟡`);
@@ -117,33 +110,31 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
         console.log(`Booked seats: ${bookedSeats}`);
       }
       console.log(`======================================\n`);
-    } catch (err: any) {
-      console.error('fetchSeats error', err);
-      setError(err.message || 'Failed to load seats');
-      
-      const fallback: Seat[] = [];
-      for (let i = 1; i <= 29; i++) {
-        fallback.push({ seat_number: String(i), state: 'BOOKED' } as Seat);
-      setRefreshing(false);
-      }
-      setSeats(fallback);
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [seats, scheduleId]);
 
+  // Fetch seats on mount and set up auto-refresh
   useEffect(() => {
     if (!scheduleId) return;
-    fetchSeats();
+    
+    fetchSeats(String(scheduleId));
     
     // Auto-refresh every 5 seconds for real-time updates
-    // This will automatically reflect any bookings made on the payment page
-    const intervalId = setInterval(() => {
-      fetchSeats(true);
+    const intervalId = setInterval(async () => {
+      setRefreshing(true);
+      await fetchSeats(String(scheduleId));
+      setRefreshing(false);
     }, 5000);
     
     return () => clearInterval(intervalId);
-  }, [scheduleId, accessToken]);
+  }, [scheduleId, fetchSeats]);
+
+  // Handle store errors
+  useEffect(() => {
+    if (storeError) {
+      setError(storeError);
+    }
+  }, [storeError]);
 
   const toggleSelect = (seatNum: string, seatState: SeatState) => {
     console.log(`👆 Clicked seat ${seatNum} (state: ${seatState})`);
@@ -160,16 +151,15 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
     }
     
     console.log(`✅ Toggling seat ${seatNum}`);
-    setSelected((s) => {
-      const newSelection = { ...s, [seatNum]: !s[seatNum] };
+    setSelected((prev) => {
+      const newSelection = { ...prev, [seatNum]: !prev[seatNum] };
       console.log('Updated selection:', Object.keys(newSelection).filter(k => newSelection[k]));
       return newSelection;
     });
     
-    // Legacy callback support (deprecated - SeatMap now handles booking internally)
+    // Legacy callback support
     if (onSelect) {
-      console.warn('⚠️ onSelect prop is deprecated. SeatMap now handles booking internally via confirmBooking()');
-      const seat = seats.find(st => st.seat_number === seatNum);
+      const seat = localSeats.find(st => st.seat_number === seatNum);
       if (seat) {
         onSelect(seat, null);
       }
@@ -208,8 +198,6 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
     console.log('✅ Navigating to payment page...');
     
     try {
-      // Navigate to payment page with selected seats and schedule details
-      // NOTE: Cannot pass functions in navigation state (causes DataCloneError)
       navigate('/dashboard/commuter/payment', {
         state: {
           selectedSeats: picks,
@@ -226,19 +214,21 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
   };
 
   // Expose refresh function for external use
-  React.useEffect(() => {
+  useEffect(() => {
     if (onBooked) {
-      // Allow parent components to trigger refresh
-      (window as any).__refreshSeatMap = () => fetchSeats(false);
+      (window as any).__refreshSeatMap = () => {
+        setRefreshing(true);
+        fetchSeats(String(scheduleId)).finally(() => setRefreshing(false));
+      };
     }
     return () => {
       delete (window as any).__refreshSeatMap;
     };
-  }, [onBooked]);
+  }, [onBooked, scheduleId, fetchSeats]);
 
   const layout = useMemo(() => {
     const seatsByNum = new Map<number, Seat>();
-    seats.forEach(s => seatsByNum.set(parseInt(s.seat_number), s));
+    localSeats.forEach(s => seatsByNum.set(parseInt(s.seat_number), s));
 
     return {
       frontRight: seatsByNum.get(1),
@@ -255,7 +245,7 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
         right: row.right.map(n => seatsByNum.get(n)).filter(Boolean) as Seat[],
       }))
     };
-  }, [seats]);
+  }, [localSeats]);
 
   const selectedSeats = Object.keys(selected).filter(k => selected[k]);
   const selectedCount = selectedSeats.length;
@@ -364,7 +354,7 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
 
   return (
     <div className={`w-full max-w-md mx-auto ${className}`}>
-      {/* Header - ULTRA COMPACT */}
+      {/* Header */}
       <div className="bg-gradient-to-br from-[#0077B6] to-[#005F8E] rounded-t-xl p-2 text-white">
         <h3 className="text-sm font-bold mb-2 flex items-center gap-1.5 justify-between">
           <div className="flex items-center gap-1.5">
@@ -375,9 +365,7 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
           </div>
           {refreshing && (
             <div className="flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded">
-              <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
+              <Loader2 className="w-3 h-3 animate-spin" />
               Updating
             </div>
           )}
@@ -427,7 +415,7 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
         </div>
       </div>
 
-      {/* Bus Interior - ULTRA COMPACT */}
+      {/* Bus Interior */}
       <div className="bg-gradient-to-b from-gray-50 to-white rounded-b-xl shadow-lg border-x-2 border-b-2 border-gray-300">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-8">
@@ -466,7 +454,7 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
               </div>
             </div>
 
-            {/* Passenger Rows - TIGHTER */}
+            {/* Passenger Rows */}
             <div className="space-y-1.5">
               {layout.rows.map((row, idx) => (
                 <div key={idx} className="flex items-center gap-2 justify-center">
@@ -504,7 +492,7 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
         )}
       </div>
 
-      {/* Selection Summary & Booking - Always Visible */}
+      {/* Selection Summary & Booking */}
       <div className="mt-2.5">
         {selectedCount > 0 ? (
           <div className="bg-gradient-to-br from-[#0077B6] to-[#005F8E] rounded-lg p-2.5 text-white shadow-lg">
@@ -564,21 +552,22 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
       {!loading && (
         <div className="mt-2.5 flex justify-center">
           <button
-            onClick={() => fetchSeats(false)}
+            onClick={() => {
+              setRefreshing(true);
+              fetchSeats(String(scheduleId)).finally(() => setRefreshing(false));
+            }}
             disabled={refreshing}
             className="bg-gray-100 text-gray-900 px-3 py-1.5 rounded-md text-xs font-semibold hover:bg-gray-200 transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <svg className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
+            <Loader2 className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
             {refreshing ? 'Updating...' : 'Refresh Seats'}
           </button>
         </div>
       )}
 
-      {/* Error/Success Messages */}
+      {/* Error Messages */}
       {error && (
-        <div className="mt-2.5 bg-red-50 border-2 border-red-200 rounded-lg p-2.5 animate-pulse">
+        <div className="mt-2.5 bg-red-50 border-2 border-red-200 rounded-lg p-2.5">
           <div className="flex items-start gap-2">
             <div className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
               <span className="text-white text-xs font-bold">!</span>
@@ -588,7 +577,10 @@ export default function SeatMap({ scheduleId, price = 0, className = '', onBooke
               <div className="text-xs text-red-700 mt-0.5">{error}</div>
             </div>
             <button
-              onClick={() => setError(null)}
+              onClick={() => {
+                setError(null);
+                clearError();
+              }}
               className="text-red-400 hover:text-red-600 transition-colors"
               aria-label="Dismiss error"
             >
