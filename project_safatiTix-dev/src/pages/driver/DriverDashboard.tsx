@@ -56,7 +56,6 @@ export default function DriverDashboard() {
   const [dashboardStats, setDashboardStats] = useState({ tripsCompleted: 0, activeTrips: 0, totalPassengers: 0, revenue: 0 });
   const [recentPassengersState, setRecentPassengersState] = useState<any[]>(recentPassengers);
   const [selectedScheduleForTracking, setSelectedScheduleForTracking] = useState<any | null>(null);
-  const [sessionScannedTickets, setSessionScannedTickets] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!accessToken) return;
@@ -296,13 +295,7 @@ export default function DriverDashboard() {
       </main>
 
       {/* ========== SCANNER MODAL ========== */}
-      {showScanner && (
-        <ScannerModal 
-          onClose={() => setShowScanner(false)} 
-          sessionScannedTickets={sessionScannedTickets}
-          setSessionScannedTickets={setSessionScannedTickets}
-        />
-      )}
+      {showScanner && <ScannerModal onClose={() => setShowScanner(false)} />}
     </div>
   );
 }
@@ -800,25 +793,13 @@ function ProfileView() {
 }
 
 // ==================== SCANNER MODAL ====================
-function ScannerModal({ 
-  onClose, 
-  sessionScannedTickets, 
-  setSessionScannedTickets 
-}: { 
-  onClose: () => void,
-  sessionScannedTickets: Set<string>,
-  setSessionScannedTickets: React.Dispatch<React.SetStateAction<Set<string>>>
-}) {
+function ScannerModal({ onClose }: { onClose: () => void }) {
   const { accessToken } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const readerRef = useRef<BrowserQRCodeReader | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const processingRef = useRef<boolean>(false); // Prevent concurrent scans
-  const lastScannedCodeRef = useRef<string | null>(null); // Prevent duplicate scans
-  
   const [scanning, setScanning] = useState(false);
-  const [scanResult, setScanResult] = useState<any>(null); // Backend response
-  const [scanMessage, setScanMessage] = useState<string | null>(null); // UI display message
+  const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
 
@@ -835,10 +816,7 @@ function ScannerModal({
   const startScanning = async () => {
     setScanning(true);
     setError(null);
-    setScanResult(null);
-    setScanMessage(null);
-    processingRef.current = false;
-    lastScannedCodeRef.current = null;
+    setResult(null);
 
     try {
       const videoInputDevices = await BrowserQRCodeReader.listVideoInputDevices();
@@ -858,15 +836,8 @@ function ScannerModal({
           videoRef.current,
           async (qrResult, err) => {
             if (qrResult) {
-              const qrCode = qrResult.getText();
-              
-              // Prevent duplicate processing of the same code
-              if (processingRef.current || lastScannedCodeRef.current === qrCode) {
-                return;
-              }
-              
-              lastScannedCodeRef.current = qrCode;
-              await handleScan(qrCode);
+              // QR code detected, process it
+              await handleScan(qrResult.getText());
             }
             if (err && !(err instanceof Error && err.message.includes('NotFoundException'))) {
               console.error('QR scanning error:', err);
@@ -899,33 +870,12 @@ function ScannerModal({
   };
 
   const handleScan = async (qrCode: string) => {
-    // Prevent concurrent processing
-    if (processingRef.current || processing) {
-      console.log('⏳ Already processing a scan, ignoring...');
-      return;
-    }
+    if (processing) return; // Prevent multiple simultaneous scans
     
-    console.log('🎫 Scanning QR code:', qrCode);
-    
-    // STEP 1: Check session first (client-side check)
-    if (sessionScannedTickets.has(qrCode)) {
-      console.log('ℹ️ Ticket already scanned in this session');
-      stopScanning();
-      setScanMessage('Ticket already scanned in this trip');
-      setScanResult({
-        success: true,
-        alreadyScannedInSession: true,
-      });
-      return;
-    }
-    
-    // STEP 2: Lock processing and stop scanning immediately
-    processingRef.current = true;
     setProcessing(true);
     stopScanning();
 
     try {
-      console.log('📡 Calling backend to validate ticket...');
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/driver/scan`, {
         method: 'POST',
         headers: {
@@ -936,66 +886,33 @@ function ScannerModal({
       });
 
       const data = await response.json();
-      console.log('📥 Backend response:', data);
 
-      // STEP 3: Process backend response
       if (data.valid) {
-        // SUCCESS: Valid ticket, first time scan
-        console.log('✅ Valid ticket - adding to session');
-        
-        // Add to session immediately
-        setSessionScannedTickets(prev => {
-          const newSet = new Set(prev);
-          newSet.add(qrCode);
-          return newSet;
-        });
-        
-        // Set stable success message
-        setScanMessage(data.message || 'Ticket scanned successfully ✓');
-        setScanResult({
+        // Success - ticket checked in
+        setResult({
           success: true,
-          alreadyScannedInSession: false,
+          message: data.message || 'Ticket validated successfully',
           ticket: data.ticket,
-          passenger: data.passenger,
         });
       } else {
-        // FAILURE: Invalid ticket from backend
-        console.log('❌ Invalid ticket:', data.reason);
-        
-        // Check if it's "already used" - could mean another driver scanned it
-        if (data.reason === 'ALREADY_USED') {
-          setScanMessage('Ticket already used by another driver ⚠️');
-        } else if (data.reason === 'TRIP_NOT_ACTIVE') {
-          setScanMessage('Trip not active - start the trip first ⚠️');
-        } else if (data.reason === 'TICKET_CANCELLED') {
-          setScanMessage('Ticket has been cancelled ❌');
-        } else {
-          setScanMessage(data.message || 'Invalid ticket ❌');
-        }
-        
-        setScanResult({
+        // Invalid ticket (already used, cancelled, etc.)
+        setResult({
           success: false,
-          reason: data.reason,
+          message: data.message || 'Invalid ticket',
           ticket: data.ticket,
         });
       }
     } catch (err: any) {
-      console.error('❌ Failed to scan ticket:', err);
+      console.error('Failed to scan ticket:', err);
       setError(err.message || 'Failed to validate ticket');
-      setScanMessage(null);
-      setScanResult(null);
     } finally {
       setProcessing(false);
-      processingRef.current = false;
     }
   };
 
   const handleScanAnother = () => {
-    setScanResult(null);
-    setScanMessage(null);
+    setResult(null);
     setError(null);
-    processingRef.current = false;
-    lastScannedCodeRef.current = null;
     startScanning();
   };
 
@@ -1011,11 +928,11 @@ function ScannerModal({
             <Scan className="w-10 h-10 text-white" />
           </div>
           <h3 className="text-2xl font-black text-slate-900 mb-2">
-            {scanning ? 'Scanning...' : scanResult ? (scanResult.success ? 'Verified!' : 'Invalid Ticket') : 'Scan QR Code'}
+            {scanning ? 'Scanning...' : result ? (result.success ? 'Verified!' : 'Invalid Ticket') : 'Scan QR Code'}
           </h3>
           <p className="text-slate-600 text-sm">
             {scanning ? 'Hold the QR code steady in frame' : 
-             scanMessage ? scanMessage : 
+             result ? result.message : 
              'Click "Start Scanning" to begin'}
           </p>
         </div>
@@ -1023,8 +940,8 @@ function ScannerModal({
         {/* Video Preview or Result */}
         <div className={`rounded-2xl mb-6 border-4 overflow-hidden ${
           scanning ? 'bg-black border-blue-300' :
-          scanResult?.success ? 'bg-green-50 border-green-300 p-8' :
-          scanResult?.success === false ? 'bg-red-50 border-red-300 p-8' :
+          result?.success ? 'bg-green-50 border-green-300 p-8' :
+          result?.success === false ? 'bg-red-50 border-red-300 p-8' :
           error ? 'bg-red-50 border-red-300 p-8' :
           'bg-slate-50 border-slate-300 border-dashed p-8'
         }`}>
@@ -1041,68 +958,30 @@ function ScannerModal({
                 <div className="w-48 h-48 border-4 border-white/50 rounded-lg"></div>
               </div>
             </div>
-          ) : scanResult ? (
+          ) : result ? (
             <div className="text-center">
-              {scanResult.success ? (
+              {result.success ? (
                 <>
                   <CheckCircle className="w-24 h-24 text-green-600 mx-auto mb-4" />
-                  <div className="font-bold text-2xl text-slate-900 mb-3">
-                    {scanResult.alreadyScannedInSession 
-                      ? 'Already Checked In'
-                      : (scanResult.passenger?.name || scanResult.ticket?.passengerName || scanResult.ticket?.commuter?.name || 'Passenger')
-                    }
+                  <div className="font-bold text-xl text-slate-900 mb-2">
+                    {result.ticket?.commuter?.name || 'Passenger'}
                   </div>
-                  {scanResult.alreadyScannedInSession ? (
-                    <div className="bg-blue-50 rounded-xl p-4 mb-3">
-                      <div className="text-sm text-blue-800 font-semibold mb-1">
-                        {scanMessage || 'This ticket was already scanned in this trip'}
-                      </div>
-                      <div className="text-xs text-blue-600">
-                        Passenger is already checked in
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="bg-white rounded-xl p-4 mb-3 space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-slate-600">Seat Number</span>
-                          <span className="font-bold text-slate-900">{scanResult.passenger?.seat || scanResult.ticket?.seatNumber || 'N/A'}</span>
-                        </div>
-                        {scanResult.passenger?.phone && (
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="text-slate-600">Phone</span>
-                            <span className="font-semibold text-slate-900">{scanResult.passenger.phone}</span>
-                          </div>
-                        )}
-                        {scanResult.ticket?.bookingRef && (
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-slate-500">Booking Ref</span>
-                            <span className="font-mono text-slate-700">{scanResult.ticket.bookingRef}</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="text-sm text-green-600 font-semibold">
-                        {scanMessage || 'Ticket scanned successfully'}
-                      </div>
-                    </>
-                  )}
+                  <div className="text-sm text-slate-600 mb-1">
+                    Seat {result.ticket?.seatNumber || 'N/A'}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {result.ticket?.bookingRef || ''}
+                  </div>
                 </>
               ) : (
                 <>
                   <AlertCircle className="w-24 h-24 text-red-600 mx-auto mb-4" />
-                  <div className="font-bold text-xl text-slate-900 mb-3">
-                    {scanMessage || 'Invalid Ticket'}
+                  <div className="font-bold text-xl text-slate-900 mb-2">
+                    {result.message}
                   </div>
-                  {scanResult.reason && (
-                    <div className="bg-red-50 rounded-lg p-3 mb-3">
-                      <div className="text-xs text-red-700 font-semibold uppercase tracking-wide">
-                        {scanResult.reason.replace(/_/g, ' ')}
-                      </div>
-                    </div>
-                  )}
-                  {scanResult.ticket && (
+                  {result.ticket && (
                     <div className="text-sm text-slate-600">
-                      {scanResult.ticket.passengerName || scanResult.ticket.commuter?.name} • Seat {scanResult.ticket.seatNumber}
+                      {result.ticket.commuter?.name} • Seat {result.ticket.seatNumber}
                     </div>
                   )}
                 </>
@@ -1122,9 +1001,9 @@ function ScannerModal({
         </div>
 
         {/* Action Buttons */}
-        {scanResult ? (
+        {result ? (
           <div className="space-y-3">
-            {scanResult.success && (
+            {result.success && (
               <button onClick={() => { stopScanning(); onClose(); }} className="w-full bg-gradient-to-r from-[#27AE60] to-[#229954] text-white py-4 rounded-xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2">
                 <CheckCircle className="w-5 h-5" />
                 Done
