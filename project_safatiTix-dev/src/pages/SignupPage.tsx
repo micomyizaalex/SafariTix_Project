@@ -1,19 +1,15 @@
-const SAFARITIX = {
-  primary: '#0077B6',
-  primaryDark: '#005F8E',
-  primarySoft: '#E6F4FB',
-};
-
-import React, { useState, CSSProperties } from 'react';
-import { Link } from 'react-router-dom';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
+// pages/SignupPage.tsx
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Bus, AlertCircle, Eye, EyeOff, TrendingUp, MapPin, Users, Check } from 'lucide-react';
+import { Bus, AlertCircle, Eye, EyeOff, TrendingUp, MapPin, Users, Check, LogIn, UserPlus } from 'lucide-react';
 import { Alert, AlertDescription } from '../components/ui/alert';
+import { useAuthStore } from '../stores/authStore';
 
 export default function SignupPage() {
+  const navigate = useNavigate();
+  const { register } = useAuthStore();
+  
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -40,7 +36,7 @@ export default function SignupPage() {
     setIsLoading(true);
 
     try {
-      const payload = {
+      const userData = {
         full_name: signupName,
         email: signupEmail,
         password: signupPassword,
@@ -48,42 +44,20 @@ export default function SignupPage() {
         company_name: signupRole === 'company_admin' ? companyName : undefined,
       };
 
-      // TEMP LOG: inspect payload before sending to ensure role is present
-      // Remove this log after verification
-      console.log('Signup payload:', payload);
-
-      const response = await fetch('http://localhost:5000/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Signup failed');
-      }
-
+      await register(userData);
+      
       setSuccessMessage('Account created successfully!');
       
-      if (data.token) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        const role = data.user?.role;
-        const rolePath: Record<string, string> = {
-          admin: '/dashboard/admin',
-          company_admin: '/dashboard/company',
-          commuter: '/dashboard/commuter',
-          driver: '/dashboard/driver'
-        };
-        window.location.href = rolePath[role] || '/';
-        return;
-      }
-
+      // Navigate based on role
+      const rolePath: Record<string, string> = {
+        admin: '/dashboard/admin',
+        company_admin: '/dashboard/company',
+        commuter: '/dashboard/commuter',
+        driver: '/dashboard/driver'
+      };
+      
       setTimeout(() => {
-        window.location.href = '/app/login';
+        navigate(rolePath[signupRole] || '/dashboard/commuter');
       }, 1200);
       
     } catch (err: any) {
@@ -93,316 +67,28 @@ export default function SignupPage() {
     }
   }
 
-  const styles: Record<string, CSSProperties> = {
-    container: {
-      display: 'flex',
-      minHeight: '100vh',
-      fontFamily: 'Inter, sans-serif',
-    },
-    // Left Side - Form
-    leftSide: {
-      flex: 1,
-      display: 'flex',
-      flexDirection: 'column' as const,
-      justifyContent: 'center',
-      padding: '40px',
-      background: 'white',
-      overflowY: 'auto' as const,
-    },
-    leftContent: {
-      maxWidth: '480px',
-      width: '100%',
-      margin: '0 auto',
-    },
-    logo: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px',
-      marginBottom: '48px',
-    },
-    logoIcon: {
-      width: '40px',
-      height: '40px',
-      background: SAFARITIX.primary,
-      borderRadius: '12px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      color: 'white',
-    },
-    logoText: {
-      fontSize: '24px',
-      fontWeight: '700',
-      color: '#2B2D42',
-      fontFamily: 'Montserrat, sans-serif',
-    },
-    heading: {
-      fontSize: 'clamp(28px, 4vw, 36px)',
-      fontWeight: '700',
-      color: '#2B2D42',
-      marginBottom: '8px',
-      fontFamily: 'Montserrat, sans-serif',
-    },
-    subheading: {
-      fontSize: '16px',
-      color: '#6b7280',
-      marginBottom: '32px',
-    },
-    socialButtons: {
-      display: 'flex',
-      gap: '12px',
-      marginBottom: '24px',
-    },
-    socialBtn: {
-      flex: 1,
-      padding: '12px 20px',
-      border: '1.5px solid #e5e7eb',
-      borderRadius: '12px',
-      background: 'white',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '8px',
-      fontSize: '14px',
-      fontWeight: '500',
-      color: '#374151',
-      transition: 'all 0.2s',
-    },
-    divider: {
-      display: 'flex',
-      alignItems: 'center',
-      margin: '24px 0',
-      color: '#9ca3af',
-      fontSize: '14px',
-    },
-    dividerLine: {
-      flex: 1,
-      height: '1px',
-      background: '#e5e7eb',
-    },
-    dividerText: {
-      padding: '0 16px',
-    },
-    formGroup: {
-      marginBottom: '20px',
-    },
-    label: {
-      display: 'block',
-      fontSize: '14px',
-      fontWeight: '500',
-      color: '#374151',
-      marginBottom: '8px',
-    },
-    input: {
-      width: '100%',
-      padding: '12px 16px',
-      border: '1.5px solid #e5e7eb',
-      borderRadius: '12px',
-      fontSize: '15px',
-      outline: 'none',
-      transition: 'all 0.2s',
-      background: 'white',
-    },
-    passwordWrapper: {
-      position: 'relative' as const,
-    },
-    passwordToggle: {
-      position: 'absolute' as const,
-      right: '16px',
-      top: '50%',
-      transform: 'translateY(-50%)',
-      background: 'transparent',
-      border: 'none',
-      cursor: 'pointer',
-      color: '#9ca3af',
-      padding: '4px',
-    },
-    checkbox: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-      marginBottom: '24px',
-    },
-    checkboxInput: {
-      width: '18px',
-      height: '18px',
-      cursor: 'pointer',
-      accentColor: SAFARITIX.primary,
-    },
-    checkboxLabel: {
-      fontSize: '14px',
-      color: '#6b7280',
-    },
-    link: {
-      color: SAFARITIX.primary,
-      textDecoration: 'none',
-      fontWeight: '500',
-    },
-    submitBtn: {
-      width: '100%',
-      padding: '14px',
-      background: SAFARITIX.primary,
-      color: 'white',
-      border: 'none',
-      borderRadius: '12px',
-      fontSize: '16px',
-      fontWeight: '600',
-      cursor: 'pointer',
-      transition: 'all 0.2s',
-      marginBottom: '20px',
-    },
-    footer: {
-      textAlign: 'center' as const,
-      fontSize: '14px',
-      color: '#6b7280',
-    },
-    // Right Side - Info Panel
-    rightSide: {
-      flex: 1,
-      background: `linear-gradient(135deg, ${SAFARITIX.primary} 0%, ${SAFARITIX.primaryDark} 100%)`,
-      padding: '60px',
-      color: 'white',
-      display: 'flex',
-      flexDirection: 'column' as const,
-      justifyContent: 'center',
-      position: 'relative' as const,
-      overflow: 'hidden' as const,
-    },
-    rightContent: {
-      position: 'relative' as const,
-      zIndex: 2,
-    },
-    rightHeading: {
-      fontSize: 'clamp(32px, 4vw, 48px)',
-      fontWeight: '700',
-      marginBottom: '16px',
-      fontFamily: 'Montserrat, sans-serif',
-      lineHeight: '1.2',
-    },
-    rightSubheading: {
-      fontSize: '18px',
-      marginBottom: '48px',
-      opacity: 0.95,
-      lineHeight: '1.6',
-    },
-    statsCard: {
-      background: 'rgba(255, 255, 255, 0.15)',
-      backdropFilter: 'blur(10px)',
-      borderRadius: '20px',
-      padding: '24px',
-      marginBottom: '20px',
-      border: '1px solid rgba(255, 255, 255, 0.2)',
-    },
-    statsHeader: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: '16px',
-    },
-    statsTitle: {
-      fontSize: '14px',
-      opacity: 0.9,
-    },
-    statsValue: {
-      fontSize: '32px',
-      fontWeight: '700',
-      marginBottom: '8px',
-    },
-    statsChange: {
-      fontSize: '14px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '4px',
-    },
-    features: {
-      marginTop: '40px',
-    },
-    feature: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px',
-      marginBottom: '16px',
-    },
-    featureIcon: {
-      width: '24px',
-      height: '24px',
-      background: 'rgba(255, 255, 255, 0.2)',
-      borderRadius: '8px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    trustedBy: {
-      marginTop: '60px',
-      paddingTop: '40px',
-      borderTop: '1px solid rgba(255, 255, 255, 0.2)',
-    },
-    trustedTitle: {
-      fontSize: '14px',
-      marginBottom: '20px',
-      opacity: 0.8,
-    },
-    logos: {
-      display: 'flex',
-      gap: '32px',
-      alignItems: 'center',
-      flexWrap: 'wrap' as const,
-    },
-    logoItem: {
-      opacity: 0.7,
-      fontSize: '20px',
-      fontWeight: '600',
-    },
-    // Decorative elements
-    circle1: {
-      position: 'absolute' as const,
-      width: '400px',
-      height: '400px',
-      borderRadius: '50%',
-      background: 'rgba(255, 255, 255, 0.05)',
-      top: '-100px',
-      right: '-100px',
-      zIndex: 1,
-    },
-    circle2: {
-      position: 'absolute' as const,
-      width: '300px',
-      height: '300px',
-      borderRadius: '50%',
-      background: 'rgba(255, 255, 255, 0.05)',
-      bottom: '-50px',
-      left: '-50px',
-      zIndex: 1,
-    },
-  };
-
   return (
-    <div style={styles.container}>
+    <div className="flex min-h-screen font-sans">
       {/* Left Side - Form */}
-      <div style={styles.leftSide}>
-        <div style={styles.leftContent}>
+      <div className="flex-1 flex flex-col justify-center p-10 bg-white overflow-y-auto">
+        <div className="max-w-[480px] w-full mx-auto">
           {/* Logo */}
-          <div style={styles.logo}>
-            <div style={styles.logoIcon}>
-              <Bus style={{ width: '24px', height: '24px' }} />
+          <Link to="/" className="flex items-center gap-3 mb-12">
+            <div className="w-10 h-10 bg-[#0077B6] rounded-xl flex items-center justify-center text-white">
+              <Bus className="w-6 h-6" />
             </div>
-            <span style={styles.logoText}>SafariTix</span>
-          </div>
+            <span className="text-2xl font-bold text-[#2B2D42] font-montserrat">SafariTix</span>
+          </Link>
 
           {/* Heading */}
-          <h1 style={styles.heading}>Get Started Now</h1>
-          <p style={styles.subheading}>
+          <h1 className="text-4xl md:text-5xl font-bold text-[#2B2D42] font-montserrat mb-2">Get Started Now</h1>
+          <p className="text-gray-500 mb-8">
             Discover the power of smart bus ticketing to enhance your travel experience.
           </p>
 
           {/* Social Login Buttons */}
-          <div style={styles.socialButtons}>
-            <button
-              style={styles.socialBtn}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#f9fafb'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'white'}
-            >
+          <div className="flex gap-3 mb-6">
+            <button className="flex-1 py-3 px-5 border-2 border-gray-200 rounded-xl bg-white hover:bg-gray-50 transition-all flex items-center justify-center gap-2 text-sm font-medium text-gray-700">
               <svg width="20" height="20" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
                 <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -414,77 +100,71 @@ export default function SignupPage() {
           </div>
 
           {/* Divider */}
-          <div style={styles.divider}>
-            <div style={styles.dividerLine} />
-            <span style={styles.dividerText}>or</span>
-            <div style={styles.dividerLine} />
+          <div className="flex items-center my-6 text-gray-400 text-sm">
+            <div className="flex-1 h-px bg-gray-200"></div>
+            <span className="px-4">or</span>
+            <div className="flex-1 h-px bg-gray-200"></div>
           </div>
 
           {/* Error/Success Messages */}
           {error && (
-            <Alert style={{ marginBottom: '20px', borderColor: '#E63946', background: '#FEE2E2' }}>
-              <AlertCircle style={{ width: '16px', height: '16px', color: '#E63946' }} />
-              <AlertDescription style={{ color: '#991B1B' }}>{error}</AlertDescription>
+            <Alert className="mb-5 border-red-200 bg-red-50">
+              <AlertCircle className="w-4 h-4 text-red-600" />
+              <AlertDescription className="text-red-800">{error}</AlertDescription>
             </Alert>
           )}
 
           {successMessage && (
-            <Alert style={{ marginBottom: '20px', borderColor: '#27AE60', background: '#DCFCE7' }}>
-              <Check style={{ width: '16px', height: '16px', color: '#27AE60' }} />
-              <AlertDescription style={{ color: '#166534' }}>{successMessage}</AlertDescription>
+            <Alert className="mb-5 border-green-200 bg-green-50">
+              <Check className="w-4 h-4 text-green-600" />
+              <AlertDescription className="text-green-800">{successMessage}</AlertDescription>
             </Alert>
           )}
 
           {/* Form */}
-          <form onSubmit={handleSignup}>
+          <form onSubmit={handleSignup} className="space-y-5">
             {/* Name */}
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Name</label>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
               <input
                 type="text"
                 placeholder="Enter your name"
                 value={signupName}
                 onChange={(e) => setSignupName(e.target.value)}
-                style={styles.input}
-                onFocus={(e) => e.currentTarget.style.borderColor = SAFARITIX.primary}
-                onBlur={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:border-[#0077B6] focus:outline-none transition-colors bg-white"
                 required
               />
             </div>
 
             {/* Email */}
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Email</label>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
               <input
                 type="email"
                 placeholder="william@company.com"
                 value={signupEmail}
                 onChange={(e) => setSignupEmail(e.target.value)}
-                style={styles.input}
-                onFocus={(e) => e.currentTarget.style.borderColor = SAFARITIX.primary}
-                onBlur={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:border-[#0077B6] focus:outline-none transition-colors bg-white"
                 required
               />
             </div>
 
             {/* Password */}
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Password</label>
-              <div style={styles.passwordWrapper}>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+              <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   placeholder="Enter your password"
                   value={signupPassword}
                   onChange={(e) => setSignupPassword(e.target.value)}
-                  style={styles.input}
-                  onFocus={(e) => e.currentTarget.style.borderColor = SAFARITIX.primary}
-                  onBlur={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:border-[#0077B6] focus:outline-none transition-colors bg-white pr-12"
                   required
                 />
                 <button
                   type="button"
-                  style={styles.passwordToggle}
                   onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
                   {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                 </button>
@@ -492,13 +172,13 @@ export default function SignupPage() {
             </div>
 
             {/* Role Selection */}
-            <div style={styles.formGroup}>
-              <label style={styles.label}>I am a</label>
-              <Select>
-                <SelectTrigger>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">I am a</label>
+              <Select value={signupRole} onValueChange={setSignupRole}>
+                <SelectTrigger className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm">
                   <SelectValue placeholder="Select your role" />
                 </SelectTrigger>
-                <SelectContent value={signupRole} onChange={(e) => setSignupRole(e.target.value)}>
+                <SelectContent>
                   <SelectItem value="commuter">Commuter (Passenger)</SelectItem>
                   <SelectItem value="company_admin">Transport Company</SelectItem>
                   <SelectItem value="driver">Driver</SelectItem>
@@ -508,54 +188,51 @@ export default function SignupPage() {
 
             {/* Company Name (conditional) */}
             {signupRole === 'company_admin' && (
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Company Name</label>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Company Name</label>
                 <input
                   type="text"
                   placeholder="Enter company name"
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
-                  style={styles.input}
-                  onFocus={(e) => e.currentTarget.style.borderColor = SAFARITIX.primary}
-                  onBlur={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:border-[#0077B6] focus:outline-none transition-colors bg-white"
                   required
                 />
               </div>
             )}
 
             {/* Terms Checkbox */}
-            <div style={styles.checkbox}>
+            <div className="flex items-center gap-2 mb-6">
               <input
                 type="checkbox"
                 id="terms"
                 checked={agreeToTerms}
                 onChange={(e) => setAgreeToTerms(e.target.checked)}
-                style={styles.checkboxInput}
+                className="w-4 h-4 accent-[#0077B6]"
               />
-              <label htmlFor="terms" style={styles.checkboxLabel}>
+              <label htmlFor="terms" className="text-sm text-gray-500">
                 I agree to the{' '}
-                <a href="/terms" style={styles.link}>
+                <Link to="/terms" className="text-[#0077B6] font-medium hover:underline">
                   Terms & Privacy
-                </a>
+                </Link>
               </label>
             </div>
 
             {/* Submit Button */}
             <button
               type="submit"
-              style={styles.submitBtn}
               disabled={isLoading}
-              onMouseEnter={(e) => !isLoading && (e.currentTarget.style.background = SAFARITIX.primaryDark)}
-              onMouseLeave={(e) => !isLoading && (e.currentTarget.style.background = SAFARITIX.primary)}
+              className="w-full bg-[#0077B6] text-white py-3 px-4 rounded-xl font-semibold hover:bg-[#005F8E] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isLoading ? 'Creating account...' : 'Sign Up'}
             </button>
           </form>
 
           {/* Footer */}
-          <p style={styles.footer}>
+          <p className="text-center text-sm text-gray-500 mt-5">
             Already have an account?{' '}
-            <Link to="/app/login" style={styles.link}>
+            <Link to="/app/login" className="text-[#0077B6] font-medium hover:underline inline-flex items-center gap-1">
+              <LogIn className="w-4 h-4" />
               Sign In
             </Link>
           </p>
@@ -563,52 +240,54 @@ export default function SignupPage() {
       </div>
 
       {/* Right Side - Info Panel */}
-      <div style={{ ...styles.rightSide, display: window.innerWidth >= 1024 ? 'flex' : 'none' }}>
+      <div className="hidden lg:flex flex-1 bg-gradient-to-br from-[#0077B6] to-[#005F8E] p-16 text-white relative overflow-hidden">
         {/* Decorative circles */}
-        <div style={styles.circle1} />
-        <div style={styles.circle2} />
+        <div className="absolute w-[400px] h-[400px] rounded-full bg-white/5 -top-[100px] -right-[100px]" />
+        <div className="absolute w-[300px] h-[300px] rounded-full bg-white/5 -bottom-[50px] -left-[50px]" />
 
-        <div style={styles.rightContent}>
-          <h2 style={styles.rightHeading}>
+        <div className="relative z-10">
+          <h2 className="text-5xl font-bold mb-4 font-montserrat leading-tight">
             Simplify Your Journey
             <br />
             and Boost Travel Efficiency
           </h2>
-          <p style={styles.rightSubheading}>
+          <p className="text-lg mb-12 opacity-95">
             Elevate Your Travel with Smart Bus Ticketing Platform.
           </p>
 
           {/* Stats Cards */}
-          <div style={styles.statsCard}>
-            <div style={styles.statsHeader}>
-              <span style={styles.statsTitle}>Active Users</span>
-              <MapPin size={20} />
+          <div className="space-y-4">
+            <div className="bg-white/20 backdrop-blur rounded-2xl p-6 border border-white/20">
+              <div className="flex justify-between items-center mb-4">
+                <span className="text-sm opacity-90">Active Users</span>
+                <MapPin className="w-5 h-5" />
+              </div>
+              <div className="text-4xl font-bold mb-2">12,543</div>
+              <div className="text-sm flex items-center gap-1">
+                <TrendingUp className="w-4 h-4" />
+                <span>40% last month</span>
+              </div>
             </div>
-            <div style={styles.statsValue}>12,543</div>
-            <div style={styles.statsChange}>
-              <TrendingUp size={16} />
-              <span>40% last month</span>
-            </div>
-          </div>
 
-          <div style={styles.statsCard}>
-            <div style={styles.statsHeader}>
-              <span style={styles.statsTitle}>Monthly Bookings</span>
-              <Users size={20} />
-            </div>
-            <div style={styles.statsValue}>8,234</div>
-            <div style={styles.statsChange}>
-              <TrendingUp size={16} />
-              <span>25% last month</span>
+            <div className="bg-white/20 backdrop-blur rounded-2xl p-6 border border-white/20">
+              <div className="flex justify-between items-center mb-4">
+                <span className="text-sm opacity-90">Monthly Bookings</span>
+                <Users className="w-5 h-5" />
+              </div>
+              <div className="text-4xl font-bold mb-2">8,234</div>
+              <div className="text-sm flex items-center gap-1">
+                <TrendingUp className="w-4 h-4" />
+                <span>25% last month</span>
+              </div>
             </div>
           </div>
 
           {/* Features */}
-          <div style={styles.features}>
+          <div className="mt-10 space-y-4">
             {['Instant ticket booking', 'Real-time bus tracking', 'Secure payments', 'Monthly subscriptions'].map((feature, idx) => (
-              <div key={idx} style={styles.feature}>
-                <div style={styles.featureIcon}>
-                  <Check size={16} />
+              <div key={idx} className="flex items-center gap-3">
+                <div className="w-6 h-6 bg-white/20 rounded-lg flex items-center justify-center">
+                  <Check className="w-4 h-4" />
                 </div>
                 <span>{feature}</span>
               </div>
@@ -616,28 +295,16 @@ export default function SignupPage() {
           </div>
 
           {/* Trusted By */}
-          <div style={styles.trustedBy}>
-            <p style={styles.trustedTitle}>Trusted by leading transport companies</p>
-            <div style={styles.logos}>
-              <span style={styles.logoItem}>Volcano</span>
-              <span style={styles.logoItem}>Ritco</span>
-              <span style={styles.logoItem}>Virunga</span>
-              <span style={styles.logoItem}>Onatracom</span>
+          <div className="mt-16 pt-10 border-t border-white/20">
+            <p className="text-sm opacity-80 mb-5">Trusted by leading transport companies</p>
+            <div className="flex gap-8 flex-wrap">
+              {['Volcano', 'Ritco', 'Virunga', 'Onatracom'].map((company, idx) => (
+                <span key={idx} className="text-xl font-semibold opacity-70">{company}</span>
+              ))}
             </div>
           </div>
         </div>
       </div>
-
-      {/* Mobile-specific styles */}
-      <style>
-        {`
-          @media (max-width: 1024px) {
-            .container {
-              flex-direction: column;
-            }
-          }
-        `}
-      </style>
     </div>
   );
 }
